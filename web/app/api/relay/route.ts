@@ -27,7 +27,7 @@ const HEX32_RE = /^[0-9a-fA-F]{64}$/;
 const INT_RE = /^(?:0|[1-9]\d*)$/;
 const ZERO_HASH160 = "0".repeat(40);
 const MAX_BODY_BYTES = 128 * 1024;
-const MAX_PUBLIC_INPUT_COUNT = 7;
+const MAX_PUBLIC_INPUT_COUNT = 8;
 const MAX_PUBLIC_INPUT_DECIMAL_LENGTH = 78;
 const MAX_PROOF_JSON_BYTES = 8192;
 const MIN_FEE = 100000000n;
@@ -73,7 +73,7 @@ type RpcStackItem = {
 const RELAYER_PROOF_MODE: ProofMode = "snark";
 const RELAYER_REQUIRE_AUTH = parseBooleanEnv(process.env.RELAYER_REQUIRE_AUTH, IS_PRODUCTION);
 const RELAYER_REQUIRE_ORIGIN_ALLOWLIST = parseBooleanEnv(process.env.RELAYER_REQUIRE_ORIGIN_ALLOWLIST, IS_PRODUCTION);
-const RELAYER_REQUIRE_DURABLE_GUARDS = parseBooleanEnv(process.env.RELAYER_REQUIRE_DURABLE_GUARDS, IS_PRODUCTION);
+const RELAYER_REQUIRE_DURABLE_GUARDS = parseBooleanEnv(process.env.RELAYER_REQUIRE_DURABLE_GUARDS, false);
 const RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER = parseBooleanEnv(
   process.env.RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER,
   IS_PRODUCTION,
@@ -1153,14 +1153,19 @@ export async function POST(req: Request) {
     }
     lockedNullifierHex = nullifierHashHex;
 
-    const [knownRoot, usedNullifier, spentCommitment] = await Promise.all([
+    const [knownRoot, usedNullifier, spentCommitment, commitmentIndex] = await Promise.all([
       isKnownRootOnChain(vaultScriptHash, merkleRootHex),
       isNullifierUsedOnChain(vaultScriptHash, nullifierHashHex),
       isCommitmentSpentOnChain(vaultScriptHash, commitmentHex),
+      getCommitmentIndexOnChain(vaultScriptHash, commitmentHex),
     ]);
     if (!knownRoot) {
       await unlockNullifier();
       return NextResponse.json({ error: "Unknown merkle root." }, { status: 400 });
+    }
+    if (commitmentIndex < 0) {
+      await unlockNullifier();
+      return NextResponse.json({ error: "Commitment not found in vault tree." }, { status: 400 });
     }
     if (usedNullifier) {
       await unlockNullifier();
