@@ -858,26 +858,39 @@ export default function Home() {
         </div>
       </div>
     
-        <div className="bg-white/5 border border-white/10 rounded-xl p-8 shadow-2xl mt-8">
-          <h2 className="text-xl font-semibold mb-4">Tree Maintainer Tools</h2>
-          <p className="text-sm text-white/70 mb-4">
-            Manually trigger an update of the on-chain Merkle root. Only required if the background cron job is disabled.
+        
+      <div className="mt-8 overflow-hidden rounded-xl border border-gray-700 bg-gray-800 shadow-2xl">
+        <div className="border-b border-gray-700 p-4">
+          <h2 className="flex items-center space-x-2 font-semibold text-gray-200">
+            <Activity className="h-5 w-5 text-purple-400" />
+            <span>Tree Maintainer Tools</span>
+          </h2>
+        </div>
+        <div className="p-6">
+          <p className="mb-4 text-sm text-gray-400">
+            Manually trigger an update of the on-chain Merkle root. Use this to sync deposits before withdrawal if the background cron job is disabled.
           </p>
           <button
             onClick={async () => {
               try {
                 const res = await fetch("/api/maintainer", { method: "POST" });
                 const data = await res.json();
-                alert(JSON.stringify(data, null, 2));
+                if (data.success) {
+                   alert("Success! Txid: " + data.txid + "\nNew Root: " + data.newRoot.slice(0, 10) + "...");
+                } else {
+                   alert(data.message || data.error || "Unknown error");
+                }
               } catch(e) {
                 alert("Error: " + e);
               }
             }}
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 rounded-lg transition-colors focus:ring-4 focus:ring-blue-500/50 outline-none"
+            className="flex w-full items-center justify-center space-x-2 rounded-lg bg-purple-600 py-3 font-medium text-white transition-colors hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
           >
-            Update Merkle Root
+            <span>Update Merkle Root</span>
           </button>
         </div>
+      </div>
+
 
       </main>
   );
