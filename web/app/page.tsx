@@ -270,10 +270,27 @@ export default function Home() {
   const [zkStatus, setZkStatus] = useState("");
   const [secretHex, setSecretHex] = useState("");
   const [nullifierPrivHex, setNullifierPrivHex] = useState("");
-  const [copiedKey, setCopiedKey] = useState<"secret" | "nullifier" | null>(null);
+  const [copiedKey, setCopiedKey] = useState<"ticket" | "secret" | "nullifier" | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  const handleCopy = async (text: string, type: "secret" | "nullifier") => {
+  
+  const getTicketString = () => {
+    if (!secretHex || !nullifierPrivHex) return "";
+    return `znep17-${secretHex}-${nullifierPrivHex}`;
+  };
+
+  const handleTicketInput = (val: string) => {
+    const parts = val.replace('znep17-', '').split('-');
+    if (parts.length === 2) {
+      setSecretHex(parts[0]);
+      setNullifierPrivHex(parts[1]);
+    } else {
+      // Just try to set it to secret if it's invalid so it doesn't break entirely, or do nothing
+      setSecretHex(val);
+    }
+  };
+
+  const handleCopy = async (text: string, type: "ticket" | "secret" | "nullifier") => {
     try {
       await navigator.clipboard.writeText(text);
       setCopiedKey(type);
@@ -395,8 +412,15 @@ export default function Home() {
 
   const handleDeposit = async () => {
     if (!account) return setError("Please connect wallet first");
-    if (!tokenHash || !vaultHash || !amount || !stealthAddress || !secretHex || !nullifierPrivHex) {
-      return setError("Please fill all fields");
+    const finalStealthAddress = stealthAddress || account.address;
+    if (!tokenHash || !vaultHash || !amount || !finalStealthAddress || !secretHex || !nullifierPrivHex) {
+      const missing = [];
+      if (!tokenHash) missing.push("Token");
+      if (!vaultHash) missing.push("Vault Hash");
+      if (!amount) missing.push("Amount");
+      if (!finalStealthAddress) missing.push("Stealth Address");
+      if (!secretHex || !nullifierPrivHex) missing.push("Privacy Ticket");
+      return setError(`Please fill all fields. Missing: ${missing.join(", ")}`);
     }
 
     setLoading(true);
@@ -421,7 +445,7 @@ export default function Home() {
           throw new Error("Vault hash mismatch with relayer configuration.");
         }
       }
-      const stealthScriptHash = toHash160(stealthAddress, "Stealth address");
+      const stealthScriptHash = toHash160(finalStealthAddress, "Stealth address");
       const amountInt = decimalToFixed8(amount);
       const noteArtifacts = await deriveNoteArtifacts(secretHex, nullifierPrivHex, amountInt, assetScriptHash);
       const normalizedLeaf = noteArtifacts.commitmentHex;
@@ -456,7 +480,13 @@ export default function Home() {
 
   const handleWithdraw = async () => {
     if (!tokenHash || !amount || !recipient || !relayer || !secretHex || !nullifierPrivHex) {
-      return setError("Please fill all required fields");
+      const missing = [];
+      if (!tokenHash) missing.push("Token");
+      if (!amount) missing.push("Amount");
+      if (!recipient) missing.push("Recipient");
+      if (!relayer) missing.push("Relayer");
+      if (!secretHex || !nullifierPrivHex) missing.push("Privacy Ticket");
+      return setError(`Please fill all required fields. Missing: ${missing.join(", ")}`);
     }
     if (relayLoading) return setError("Relayer configuration is still loading");
 
@@ -633,24 +663,14 @@ export default function Home() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-500">Manual Secret (Hex)</label>
+                  <div className="md:col-span-2">
+                    <label className="mb-1 block text-sm font-medium text-gray-500">Manual Privacy Ticket</label>
                     <input
                       type="password"
-                      value={secretHex}
-                      onChange={(e) => setSecretHex(e.target.value)}
-                      className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 font-mono text-sm text-white"
-                      placeholder="Override stored secret"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-500">Manual Nullifier (Hex)</label>
-                    <input
-                      type="password"
-                      value={nullifierPrivHex}
-                      onChange={(e) => setNullifierPrivHex(e.target.value)}
-                      className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 font-mono text-sm text-white"
-                      placeholder="Override stored nullifier"
+                      value={getTicketString()}
+                      onChange={(e) => handleTicketInput(e.target.value)}
+                      className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 font-mono text-sm text-white focus:border-blue-500 focus:outline-none transition-colors"
+                      placeholder="Paste your znep17-... ticket here"
                     />
                   </div>
                 </div>
@@ -832,16 +852,19 @@ export default function Home() {
                     For maximum security, copy these values. You will need them to withdraw if you clear your browser cache.
                   </p>
                   <div className="space-y-2 font-mono text-xs">
-                    <div className="flex items-center justify-between rounded bg-black/20 p-2">
-                      <div className="truncate pr-2"><span className="select-none text-yellow-700">Secret:</span> {secretHex}</div>
-                      <button onClick={() => handleCopy(secretHex, "secret")} className="hover:text-yellow-300">
-                        {copiedKey === "secret" ? <Check className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4" />}
-                      </button>
-                    </div>
-                    <div className="flex items-center justify-between rounded bg-black/20 p-2">
-                      <div className="truncate pr-2"><span className="select-none text-yellow-700">Nullifier:</span> {nullifierPrivHex}</div>
-                      <button onClick={() => handleCopy(nullifierPrivHex, "nullifier")} className="hover:text-yellow-300">
-                        {copiedKey === "nullifier" ? <Check className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4" />}
+                    <div className="flex items-center justify-between rounded bg-black/20 p-3 border border-yellow-700/50">
+                      <div className="truncate pr-4 text-yellow-200 tracking-wider">
+                        {getTicketString()}
+                      </div>
+                      <button 
+                        onClick={() => handleCopy(getTicketString(), "ticket")} 
+                        className="flex items-center gap-1 bg-yellow-600/20 hover:bg-yellow-600/40 text-yellow-400 px-3 py-1.5 rounded transition-colors shrink-0"
+                      >
+                        {copiedKey === "ticket" ? (
+                           <><Check className="h-4 w-4" /> Copied!</>
+                        ) : (
+                           <><Copy className="h-4 w-4" /> Copy Ticket</>
+                        )}
                       </button>
                     </div>
                   </div>
