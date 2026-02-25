@@ -271,6 +271,7 @@ export default function Home() {
   const [secretHex, setSecretHex] = useState("");
   const [nullifierPrivHex, setNullifierPrivHex] = useState("");
   const [copiedKey, setCopiedKey] = useState<"secret" | "nullifier" | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const handleCopy = async (text: string, type: "secret" | "nullifier") => {
     try {
@@ -360,6 +361,21 @@ export default function Home() {
       cancelled = true;
     };
   }, [amount, nullifierPrivHex, secretHex, tokenHash]);
+
+  useEffect(() => {
+    const hasPending = localStorage.getItem("znep17_has_pending");
+    if (hasPending === "true") {
+       const lsSecret = localStorage.getItem("znep17_last_secret");
+       const lsNullifier = localStorage.getItem("znep17_last_nullifier");
+       const lsAmount = localStorage.getItem("znep17_last_amount");
+       const lsToken = localStorage.getItem("znep17_last_token");
+       
+       if (lsSecret) setSecretHex(lsSecret);
+       if (lsNullifier) setNullifierPrivHex(lsNullifier);
+       if (lsAmount) setAmount(lsAmount);
+       if (lsToken) setTokenHash(lsToken);
+    }
+  }, []);
 
   const connectWallet = async () => {
     try {
@@ -546,6 +562,11 @@ export default function Home() {
       const amountInt = decimalToFixed8(amount);
       const noteArtifacts = await deriveNoteArtifacts(sec, nul, amountInt, assetScriptHash);
       setLeafHex(noteArtifacts.commitmentHex);
+      localStorage.setItem("znep17_last_secret", sec);
+      localStorage.setItem("znep17_last_nullifier", nul);
+      localStorage.setItem("znep17_last_amount", amount);
+      localStorage.setItem("znep17_last_token", tokenHash);
+      localStorage.setItem("znep17_has_pending", "true");
 
       if (!stealthAddress && account) {
         setStealthAddress(account.address);
@@ -572,6 +593,71 @@ export default function Home() {
                 Network Magic: {networkMagic}
               </span>
             )}
+
+
+          {/* Advanced Settings Accordion */}
+          <div className="mt-8 border-t border-gray-800 pt-4">
+            <button 
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-300 transition-colors"
+            >
+              {showAdvanced ? "Hide Advanced Settings" : "Show Advanced Settings"}
+            </button>
+            
+            {showAdvanced && (
+              <div className="mt-4 space-y-4 rounded-lg bg-gray-900/50 p-4 border border-gray-800">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-500">Vault Contract Hash</label>
+                    <input
+                      type="text"
+                      value={vaultHash}
+                      onChange={(e) => {
+                        if (ALLOW_CUSTOM_VAULT_HASH) setVaultHash(e.target.value);
+                      }}
+                      readOnly={!ALLOW_CUSTOM_VAULT_HASH}
+                      className={`w-full rounded-lg border border-gray-700 px-3 py-2 text-sm text-white ${
+                        ALLOW_CUSTOM_VAULT_HASH ? "bg-gray-800" : "cursor-not-allowed bg-gray-800/60 text-gray-400"
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-500">Relayer Address</label>
+                    <input
+                      type="text"
+                      value={relayer}
+                      readOnly
+                      className="w-full cursor-not-allowed rounded-lg border border-gray-700 bg-gray-800/60 px-3 py-2 text-sm text-gray-400"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-500">Manual Secret (Hex)</label>
+                    <input
+                      type="password"
+                      value={secretHex}
+                      onChange={(e) => setSecretHex(e.target.value)}
+                      className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 font-mono text-sm text-white"
+                      placeholder="Override stored secret"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-gray-500">Manual Nullifier (Hex)</label>
+                    <input
+                      type="password"
+                      value={nullifierPrivHex}
+                      onChange={(e) => setNullifierPrivHex(e.target.value)}
+                      className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 font-mono text-sm text-white"
+                      placeholder="Override stored nullifier"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
             {currentRootHex && (
               <span className="rounded border border-blue-700/60 bg-blue-950/40 px-2 py-1 font-mono">
                 Root: 0x{currentRootHex.slice(0, 10)}...
@@ -647,207 +733,102 @@ export default function Home() {
         </div>
 
         <div className="space-y-4 p-6">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div>
-                <label className="mb-1 block text-sm font-medium text-gray-400">Vault Contract Hash</label>
-                <input
-                  type="text"
-                  value={vaultHash}
-                  onChange={(e) => {
-                    if (ALLOW_CUSTOM_VAULT_HASH) {
-                      setVaultHash(e.target.value);
-                    }
-                  }}
-                  readOnly={!ALLOW_CUSTOM_VAULT_HASH}
-                  className={`w-full rounded-lg border border-gray-700 px-4 py-2 text-white ${
-                    ALLOW_CUSTOM_VAULT_HASH ? "bg-gray-900" : "cursor-not-allowed bg-gray-900/60 text-gray-300"
-                  }`}
-                  placeholder={ALLOW_CUSTOM_VAULT_HASH ? "0x..." : "Vault hash from relayer"}
-                />
-                {!ALLOW_CUSTOM_VAULT_HASH && (
-                  <p className="mt-1 text-xs text-gray-500">
-                    Locked to relayer-provided vault hash to prevent misrouting deposits.
-                  </p>
-                )}
-              </div>
-            <div>
+          <div className="flex flex-col md:flex-row gap-4 mb-4">
+            <div className="flex-1">
               <div className="flex justify-between items-center mb-1">
                 <label className="block text-sm font-medium text-gray-400">Token Script Hash (Asset)</label>
                 <div className="space-x-2 text-xs">
-                  <button
-                    onClick={() => setTokenHash("0xd2a4cff31913016155e38e474a2c06d08be276cf")}
-                    className="text-gray-500 hover:text-green-400 transition-colors"
-                  >
-                    GAS
-                  </button>
-                  <button
-                    onClick={() => setTokenHash("0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5")}
-                    className="text-gray-500 hover:text-green-400 transition-colors"
-                  >
-                    NEO
-                  </button>
+                  <button onClick={() => setTokenHash("0xd2a4cff31913016155e38e474a2c06d08be276cf")} className="text-gray-500 hover:text-green-400 transition-colors">GAS</button>
+                  <button onClick={() => setTokenHash("0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5")} className="text-gray-500 hover:text-green-400 transition-colors">NEO</button>
                 </div>
               </div>
-              <input
-                type="text"
-                value={tokenHash}
-                onChange={(e) => setTokenHash(e.target.value)}
-                className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-white font-mono text-sm"
-                placeholder="0x..."
-              />
+              <input type="text" value={tokenHash} onChange={(e) => setTokenHash(e.target.value)} className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-white font-mono text-sm" placeholder="0x..." />
             </div>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-400">Amount</label>
-            <input
-              type="number"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-2xl text-white"
-              placeholder="0.0"
-            />
+            <div className="w-full md:w-1/3">
+              <label className="mb-1 block text-sm font-medium text-gray-400">Amount</label>
+              <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-white font-mono text-sm" placeholder="0.0" />
+            </div>
           </div>
 
           {activeTab === "deposit" ? (
             <>
-              <div className="border-t border-gray-700 pt-4">
-                <div className="mb-1 flex items-center justify-between">
-                  <label className="block text-sm font-medium text-gray-400">Privacy Leaf Details</label>
-                  <button onClick={generateRandomParams} className="text-xs text-green-400 hover:text-green-300">
-                    Generate Random
-                  </button>
-                </div>
-                <div className="space-y-4">
-                  {secretHex && (
-                    <div className="mb-2 rounded-lg border border-yellow-700/50 bg-yellow-900/30 p-3 font-mono text-xs text-yellow-500">
-                      <p className="mb-2 text-[10px] font-bold uppercase tracking-wider">
-                        Save these securely with the exact deposit asset + amount
-                      </p>
-                      <div className="flex items-center justify-between bg-black/20 p-2 rounded mb-2 overflow-hidden">
-                        <div className="truncate flex-1 pr-2">
-                          <span className="text-yellow-700 select-none">Secret:</span> {secretHex}
-                        </div>
-                        <button
-                          onClick={() => handleCopy(secretHex, "secret")}
-                          className="text-yellow-500 hover:text-yellow-300 transition-colors shrink-0"
-                        >
-                          {copiedKey === "secret" ? (
-                            <Check className="h-4 w-4 text-green-400" />
-                          ) : (
-                            <Copy className="h-4 w-4" />
-                          )}
-                        </button>
-                      </div>
-                      <div className="flex items-center justify-between bg-black/20 p-2 rounded overflow-hidden">
-                        <div className="truncate flex-1 pr-2">
-                          <span className="text-yellow-700 select-none">Nullifier:</span> {nullifierPrivHex}
-                        </div>
-                        <button
-                          onClick={() => handleCopy(nullifierPrivHex, "nullifier")}
-                          className="text-yellow-500 hover:text-yellow-300 transition-colors shrink-0"
-                        >
-                          {copiedKey === "nullifier" ? (
-                            <Check className="h-4 w-4 text-green-400" />
-                          ) : (
-                            <Copy className="h-4 w-4" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  <div>
-                    <input
-                      type="text"
-                      value={stealthAddress}
-                      onChange={(e) => setStealthAddress(e.target.value)}
-                      className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-sm text-white"
-                      placeholder="Stealth Address (Base58 or ScriptHash)"
-                    />
-                  </div>
-                  <div>
-                    <input
-                      type="text"
-                      value={leafHex}
-                      readOnly
-                      className="w-full cursor-not-allowed rounded-lg border border-gray-700/50 bg-gray-900/50 px-4 py-2 font-mono text-sm text-gray-400"
-                      placeholder="32-byte Leaf (Auto-Generated)"
-                    />
-                  </div>
-                </div>
+              <div className="mb-4">
+                <input
+                  type="text"
+                  value={stealthAddress}
+                  onChange={(e) => setStealthAddress(e.target.value)}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-sm text-white"
+                  placeholder="Destination (Optional Stealth Address)"
+                />
               </div>
+
+              {(!secretHex || !nullifierPrivHex) && (
+                 <button
+                   onClick={generateRandomParams}
+                   className="mb-4 w-full rounded-lg border border-green-500/30 bg-green-500/10 py-3 text-sm font-medium text-green-400 transition-colors hover:bg-green-500/20"
+                 >
+                   Generate Privacy Ticket (Required)
+                 </button>
+              )}
+
+              {secretHex && (
+                <div className="mb-4 rounded-lg border border-yellow-700/50 bg-yellow-900/30 p-4 text-yellow-500">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="font-semibold text-yellow-400">Your Privacy Ticket</h3>
+                    <span className="rounded bg-yellow-500/20 px-2 py-0.5 text-[10px] font-bold text-yellow-300">AUTO-SAVED IN BROWSER</span>
+                  </div>
+                  <p className="mb-4 text-xs text-yellow-600/80">
+                    For maximum security, copy these values. You will need them to withdraw if you clear your browser cache.
+                  </p>
+                  <div className="space-y-2 font-mono text-xs">
+                    <div className="flex items-center justify-between rounded bg-black/20 p-2">
+                      <div className="truncate pr-2"><span className="select-none text-yellow-700">Secret:</span> {secretHex}</div>
+                      <button onClick={() => handleCopy(secretHex, "secret")} className="hover:text-yellow-300">
+                        {copiedKey === "secret" ? <Check className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <div className="flex items-center justify-between rounded bg-black/20 p-2">
+                      <div className="truncate pr-2"><span className="select-none text-yellow-700">Nullifier:</span> {nullifierPrivHex}</div>
+                      <button onClick={() => handleCopy(nullifierPrivHex, "nullifier")} className="hover:text-yellow-300">
+                        {copiedKey === "nullifier" ? <Check className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <button
                 onClick={handleDeposit}
-                disabled={loading || !account}
-                className="mt-4 flex w-full items-center justify-center space-x-2 rounded-lg bg-green-500 py-3 font-bold text-white hover:bg-green-600 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={loading || !account || !secretHex}
+                className="mt-2 flex w-full items-center justify-center space-x-2 rounded-lg bg-green-600 py-4 font-bold text-white transition-colors hover:bg-green-500 focus:ring-4 focus:ring-green-500/50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {loading ? <Activity className="h-5 w-5 animate-spin" /> : <ArrowRight className="h-5 w-5" />}
-                <span>{account ? "Process Deposit" : "Connect Wallet to Deposit"}</span>
+                <span>{account ? (secretHex ? "Deposit Anonymously" : "Generate Ticket First") : "Connect Wallet to Deposit"}</span>
               </button>
             </>
           ) : (
             <>
-              <div className="rounded border border-blue-800/50 bg-blue-950/30 px-3 py-2 text-xs text-blue-300">
-                SNARK mode uses browser-side proof generation. Deposit and withdraw must use the same secret/nullifier
-                plus the same asset and amount.
+              <div className="mb-4">
+                <label className="mb-1 block text-sm font-medium text-gray-400">Final Recipient Address</label>
+                <input
+                  type="text"
+                  value={recipient}
+                  onChange={(e) => setRecipient(e.target.value)}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-sm text-white"
+                  placeholder="Address to receive funds cleanly"
+                />
               </div>
-
-              <div className="space-y-4 border-t border-gray-700 pt-4">
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-400">Deposit Secret (Hex)</label>
-                    <input
-                      type="password"
-                      value={secretHex}
-                      onChange={(e) => setSecretHex(e.target.value)}
-                      className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 font-mono text-sm text-white"
-                      placeholder="Generated from Deposit"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-400">Deposit Nullifier (Hex)</label>
-                    <input
-                      type="password"
-                      value={nullifierPrivHex}
-                      onChange={(e) => setNullifierPrivHex(e.target.value)}
-                      className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 font-mono text-sm text-white"
-                      placeholder="Generated from Deposit"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-400">Recipient</label>
-                    <input
-                      type="text"
-                      value={recipient}
-                      onChange={(e) => setRecipient(e.target.value)}
-                      className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-sm text-white"
-                      placeholder="Recipient Address"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-gray-400">Relayer</label>
-                    <input
-                      type="text"
-                      value={relayer}
-                      readOnly
-                      className="w-full cursor-not-allowed rounded-lg border border-gray-700 bg-gray-900/60 px-4 py-2 text-sm text-gray-300"
-                      placeholder="Relayer Address from server"
-                    />
-                    <p className="mt-1 text-xs text-gray-500">
-                      Bound to server relayer to prevent proof/front-run mismatch.
-                    </p>
-                  </div>
-                </div>
-              </div>
+              
+              {(!secretHex || !nullifierPrivHex) && (
+                 <div className="mb-4 rounded border border-yellow-800/50 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-400">
+                    <strong>No auto-saved ticket found.</strong> Please open Advanced Settings to enter your Secret and Nullifier manually.
+                 </div>
+              )}
 
               <button
                 onClick={handleWithdraw}
-                disabled={loading || relayLoading || !relayer}
-                className="mt-4 flex w-full items-center justify-center space-x-2 rounded-lg bg-blue-500 py-3 font-bold text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={loading || relayLoading || !relayer || !secretHex}
+                className="mt-4 flex w-full items-center justify-center space-x-2 rounded-lg bg-blue-600 py-4 font-bold text-white transition-colors hover:bg-blue-500 focus:ring-4 focus:ring-blue-500/50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {loading ? <Activity className="h-5 w-5 animate-spin" /> : <Shield className="h-5 w-5" />}
                 <span>{relayLoading ? "Loading Relayer..." : "Process Withdraw"}</span>
