@@ -20,9 +20,10 @@ public class zNEP17Groth16Verifier : SmartContract
         byte[] publicInputs,
         byte[] merkleRoot,
         byte[] nullifierHash,
+        byte[] newCommitment,
         UInt160 recipient,
         UInt160 relayer,
-        BigInteger amount,
+        BigInteger amountWithdraw,
         BigInteger fee)
     {
         if (!asset.IsValidAndNotZero || !recipient.IsValidAndNotZero || !relayer.IsValidAndNotZero)
@@ -35,10 +36,12 @@ public class zNEP17Groth16Verifier : SmartContract
             return false;
         if (nullifierHash is null || nullifierHash.Length != 32)
             return false;
-        if (amount <= 0 || fee < 0 || amount <= fee)
+        if (newCommitment is null || newCommitment.Length != 32)
+            return false;
+        if (amountWithdraw <= 0 || fee < 0 || amountWithdraw <= fee)
             return false;
 
-        if (!ValidatePublicInputs(publicInputs, merkleRoot, nullifierHash, recipient, relayer, amount, fee, asset))
+        if (!ValidatePublicInputs(publicInputs, merkleRoot, nullifierHash, recipient, relayer, amountWithdraw, fee, asset, newCommitment))
             return false;
 
         byte[] proofABytes = Slice(proof, 0, VerificationKeyBls12381.G1CompressedLength);
@@ -90,9 +93,10 @@ public class zNEP17Groth16Verifier : SmartContract
         byte[] nullifierHash,
         UInt160 recipient,
         UInt160 relayer,
-        BigInteger amount,
+        BigInteger amountWithdraw,
         BigInteger fee,
-        UInt160 asset)
+        UInt160 asset,
+        byte[] newCommitment)
     {
         if (!TryEncodeUInt160Scalar(recipient, out byte[] recipientScalar))
             return false;
@@ -106,21 +110,23 @@ public class zNEP17Groth16Verifier : SmartContract
             return false;
         if (!SliceEquals(publicInputs, 3 * VerificationKeyBls12381.ScalarLength, relayerScalar))
             return false;
-        if (!TryEncodeBigIntegerScalar(amount, out byte[] amountScalar))
-            return false;
-        if (!SliceEquals(publicInputs, 4 * VerificationKeyBls12381.ScalarLength, amountScalar))
+        if (!TryEncodeBigIntegerScalar(amountWithdraw, out byte[] amountWithdrawScalar))
             return false;
         if (!TryEncodeBigIntegerScalar(fee, out byte[] feeScalar))
             return false;
-        if (!SliceEquals(publicInputs, 5 * VerificationKeyBls12381.ScalarLength, feeScalar))
+        if (!SliceEquals(publicInputs, 4 * VerificationKeyBls12381.ScalarLength, feeScalar))
             return false;
         if (!TryEncodeUInt160Scalar(asset, out byte[] assetScalar))
             return false;
-        if (!SliceEquals(publicInputs, 6 * VerificationKeyBls12381.ScalarLength, assetScalar))
+        if (!SliceEquals(publicInputs, 5 * VerificationKeyBls12381.ScalarLength, assetScalar))
+            return false;
+        if (!SliceEquals(publicInputs, 6 * VerificationKeyBls12381.ScalarLength, amountWithdrawScalar))
+            return false;
+        if (!SliceEquals(publicInputs, 7 * VerificationKeyBls12381.ScalarLength, Reverse32(newCommitment)))
             return false;
 
         return true;
-}
+    }
 
     private static bool TryEncodeBigIntegerScalar(BigInteger value, out byte[] scalar)
     {

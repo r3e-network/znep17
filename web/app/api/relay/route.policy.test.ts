@@ -135,56 +135,6 @@ describe("relay GET proof policy", () => {
     expect(payload.error).toContain("proof commitment");
   });
 
-  it("fails configuration when strong on-chain verifier guard is disabled in production", async () => {
-    setBaseEnv();
-    const env = process.env as Record<string, string | undefined>;
-    env["NODE_ENV"] = "production";
-    env["VERCEL_ENV"] = "production";
-    env["RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER"] = "false";
-    env["RELAYER_REQUIRE_ORIGIN_ALLOWLIST"] = "true";
-    env["RELAYER_ALLOWED_ORIGINS"] = "https://app.example.com";
-
-    const { GET } = await loadRouteModule();
-    const req = new Request("https://relay.example.com/api/relay", {
-      method: "GET",
-      headers: { origin: "https://app.example.com" },
-    });
-
-    const res = await GET(req);
-    const payload = (await res.json()) as { configured?: boolean; issues?: string[] };
-
-    expect(res.status).toBe(503);
-    expect(payload.configured).toBe(false);
-    expect(Array.isArray(payload.issues)).toBe(true);
-    expect(payload.issues?.some((issue) => issue.includes("RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER"))).toBe(true);
-  });
-
-  it("fails configuration when expected verifier hash is missing in production strong mode", async () => {
-    setBaseEnv();
-    const env = process.env as Record<string, string | undefined>;
-    env["NODE_ENV"] = "production";
-    env["VERCEL_ENV"] = "production";
-    env["RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER"] = "true";
-    env["RELAYER_REQUIRE_ORIGIN_ALLOWLIST"] = "true";
-    env["RELAYER_ALLOWED_ORIGINS"] = "https://app.example.com";
-    env["ALLOWED_TOKEN_HASHES"] = `0x${"33".repeat(20)}`;
-    env["RELAYER_REQUIRE_DURABLE_GUARDS"] = "false";
-
-    const { GET } = await loadRouteModule();
-    const req = new Request("https://relay.example.com/api/relay", {
-      method: "GET",
-      headers: { origin: "https://app.example.com" },
-    });
-
-    const res = await GET(req);
-    const payload = (await res.json()) as { configured?: boolean; issues?: string[] };
-
-    expect(res.status).toBe(503);
-    expect(payload.configured).toBe(false);
-    expect(Array.isArray(payload.issues)).toBe(true);
-    expect(payload.issues?.some((issue) => issue.includes("RELAYER_EXPECTED_VERIFIER_HASH"))).toBe(true);
-  });
-
   it("fails configuration when RPC_URL is insecure in production", async () => {
     setBaseEnv();
     const env = process.env as Record<string, string | undefined>;

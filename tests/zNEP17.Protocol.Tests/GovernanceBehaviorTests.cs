@@ -270,6 +270,7 @@ public class GovernanceBehaviorTests
                 new byte[] { 0x02, 0x03 },
                 root,
                 nullifier,
+                leaf,
                 recipient.Account,
                 relayer.Account,
                 10,
@@ -321,39 +322,61 @@ public class GovernanceBehaviorTests
     }
 
     [Fact]
-    public void DummyTest322() { }
-
-    [Fact]
-    public void DummyTest358()
+    public void UpdateMerkleRoot_Rejects_StaleExpectedLeafCount()
     {
         var engine = new TestEngine(true);
         Signer owner = TestEngine.GetNewSigner(WitnessScope.Global);
         Signer depositor = TestEngine.GetNewSigner(WitnessScope.Global);
         UInt160 stealth = TestEngine.GetNewSigner().Account;
-        UInt160 wrongAsset = TestEngine.GetNewSigner().Account;
 
         engine.SetTransactionSigners(owner);
         var vault = DeployVault(engine);
         var token = DeployToken(engine);
         vault.SetAssetAllowed(token.Hash, true);
         vault.TreeMaintainer = owner.Account;
-        token.MintForTesting(depositor.Account, 50);
+        token.MintForTesting(depositor.Account, 20);
 
         byte[] commitment = NewFixedBytes(0x88);
         engine.SetTransactionSigners(depositor);
         token.Transfer(depositor.Account, vault.Hash, 10, new object[] { stealth, commitment });
 
         engine.SetTransactionSigners(owner);
-        vault.SetPaused(true);
+        Assert.Throws<TestException>(() => vault.UpdateMerkleRoot(NewFixedBytes(0x89), 0));
 
+        BigInteger leafCount = RequireBigInteger(vault.LeafIndex);
+        byte[] root = NewFixedBytes(0x8A);
+        vault.UpdateMerkleRoot(root, leafCount);
+        Assert.True(RequireBool(vault.IsKnownRoot(root)));
+    }
 
+    [Fact]
+    public void Deposit_Rejects_DuplicateCommitmentLeaf()
+    {
+        var engine = new TestEngine(true);
+        Signer owner = TestEngine.GetNewSigner(WitnessScope.Global);
+        Signer depositor = TestEngine.GetNewSigner(WitnessScope.Global);
+        UInt160 stealth = TestEngine.GetNewSigner().Account;
+
+        engine.SetTransactionSigners(owner);
+        var vault = DeployVault(engine);
+        var token = DeployToken(engine);
+        vault.SetAssetAllowed(token.Hash, true);
+        vault.TreeMaintainer = owner.Account;
+        token.MintForTesting(depositor.Account, 30);
+
+        byte[] commitment = NewFixedBytes(0x90);
         engine.SetTransactionSigners(depositor);
+        token.Transfer(depositor.Account, vault.Hash, 10, new object[] { stealth, commitment });
+        Assert.Throws<TestException>(() =>
+            token.Transfer(depositor.Account, vault.Hash, 5, new object[] { stealth, commitment }));
 
+        Assert.Equal(new BigInteger(1), RequireBigInteger(vault.LeafIndex));
+        Assert.Equal(commitment, RequireBytes(vault.GetLeaf(0)));
         Assert.Equal(new BigInteger(10), RequireBigInteger(vault.GetAssetEscrowBalance(token.Hash)));
     }
 
     [Fact]
-    public void DummyTest386()
+    public void Withdraw_Rejects_WhenCommitmentAlreadySpent()
     {
         var engine = new TestEngine(true);
         Signer owner = TestEngine.GetNewSigner(WitnessScope.Global);
@@ -364,20 +387,55 @@ public class GovernanceBehaviorTests
         engine.SetTransactionSigners(owner);
         var vault = DeployVault(engine);
         var token = DeployToken(engine);
+        var verifier = DeployVerifier(engine);
+        verifier.Result = true;
+        vault.Verifier = verifier.Hash;
+        vault.Relayer = owner.Account;
         vault.SetAssetAllowed(token.Hash, true);
         vault.TreeMaintainer = owner.Account;
-        token.MintForTesting(depositor.Account, 20);
+        token.MintForTesting(depositor.Account, 30);
 
-        byte[] commitment = NewFixedBytes(0x90);
+        byte[] commitment = NewFixedBytes(0x91);
         engine.SetTransactionSigners(depositor);
         token.Transfer(depositor.Account, vault.Hash, 10, new object[] { stealth, commitment });
 
+        byte[] root = PublishRoot(engine, vault, owner, 0x92);
+        byte[] nullifierA = NewFixedBytes(0x93);
+        byte[] nullifierB = NewFixedBytes(0x94);
+
         engine.SetTransactionSigners(owner);
-        vault.SetPaused(true);
+        byte[] proof = new byte[PrivacyGuards.Groth16ProofLength];
+        byte[] publicInputs = new byte[PrivacyGuards.Groth16PublicInputsLength];
+        proof[0] = 0x01;
+        publicInputs[0] = 0x02;
+        vault.Withdraw(
+            token.Hash,
+            proof,
+            publicInputs,
+            root,
+            nullifierA,
+            commitment,
+            recipient.Account,
+            owner.Account,
+            10,
+            1);
 
-        vault.SetPaused(false);
+        Assert.Throws<TestException>(() =>
+            vault.Withdraw(
+                token.Hash,
+                proof,
+                publicInputs,
+                root,
+                nullifierB,
+                commitment,
+                recipient.Account,
+                owner.Account,
+                10,
+                1));
 
-        engine.SetTransactionSigners(depositor);
+        Assert.True(RequireBool(vault.IsNullifierUsed(nullifierA)));
+        Assert.False(RequireBool(vault.IsNullifierUsed(nullifierB)));
+        Assert.Equal(new BigInteger(9), RequireBigInteger(token.BalanceOf(recipient.Account)));
     }
 
     [Fact]
@@ -458,7 +516,8 @@ public class GovernanceBehaviorTests
     {
         byte[] root = NewFixedBytes(rootSeed);
         engine.SetTransactionSigners(owner);
-        vault.UpdateMerkleRoot(root);
+        BigInteger leafCount = RequireBigInteger(vault.LeafIndex);
+        vault.UpdateMerkleRoot(root, leafCount);
         return root;
     }
 

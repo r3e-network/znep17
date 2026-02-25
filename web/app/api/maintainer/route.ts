@@ -1,140 +1,724 @@
 import { NextResponse } from "next/server";
-import { wallet, rpc, tx, u, sc } from "@cityofzion/neon-js";
+import { createHash, timingSafeEqual } from "node:crypto";
+import { experimental, rpc, sc, tx, wallet } from "@cityofzion/neon-js";
+import { Redis } from "@upstash/redis";
 import { poseidon2Bls } from "../../lib/blsPoseidon";
-import { supabase } from "../../lib/supabase";
+import { getSupabaseAdminClient } from "../../lib/supabase";
+import { isOriginAllowed, parseBearerToken, parseOriginAllowlist } from "../relay/policy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-export async function POST() {
+const HASH160_HEX_RE = /^(?:0x)?[0-9a-fA-F]{40}$/;
+const HEX32_RE = /^[0-9a-fA-F]{64}$/;
+const TREE_DEPTH = 20;
+const DEFAULT_LOCK_TTL_MS = 120_000;
+const DEFAULT_MAX_SYNC_LEAVES = 20_000;
+const DEFAULT_CHAIN_FETCH_CONCURRENCY = 6;
+
+type GuardStoreMode = "memory" | "durable";
+
+type MaintainerConfig = {
+  rpcUrl: string;
+  vaultHash: string;
+  maintainerWif: string;
+  maintainerApiKey: string;
+  requireAuth: boolean;
+  requireOriginAllowlist: boolean;
+  requireDurableLock: boolean;
+  originAllowlist: ReturnType<typeof parseOriginAllowlist>;
+  isProduction: boolean;
+  guardStoreMode: GuardStoreMode;
+  lockTtlMs: number;
+  maxSyncLeaves: number;
+  chainFetchConcurrency: number;
+  kvRestApiUrl: string;
+  kvRestApiToken: string;
+};
+
+type RpcStackItem = {
+  type?: string;
+  value?: unknown;
+};
+
+type RpcInvokeResult = {
+  state?: string;
+  exception?: string | null;
+  stack?: RpcStackItem[];
+};
+
+type RpcClientInstance = InstanceType<typeof rpc.RPCClient>;
+
+const ZERO_HASHES = buildZeroHashes();
+const inMemoryLocks = new Map<string, number>();
+
+function parseBooleanEnv(raw: string | undefined, defaultValue: boolean): boolean {
+  if (typeof raw !== "string") return defaultValue;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") return true;
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") return false;
+  return defaultValue;
+}
+
+function parsePositiveIntEnv(raw: string | undefined, defaultValue: number): number {
+  if (typeof raw !== "string") return defaultValue;
+  const normalized = raw.trim();
+  if (!/^\d+$/.test(normalized)) return defaultValue;
+  const parsed = Number(normalized);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) return defaultValue;
+  return parsed;
+}
+
+function hasSecureRpcTransport(url: string): boolean {
+  const value = url.trim();
+  return /^https:\/\//i.test(value) || /^wss:\/\//i.test(value);
+}
+
+function normalizeHash160(input: string, fieldName: string): string {
+  const trimmed = input.trim();
+  if (!HASH160_HEX_RE.test(trimmed)) {
+    throw new Error(`${fieldName} must be a valid 20-byte script hash.`);
+  }
+  return trimmed.replace(/^0x/i, "").toLowerCase();
+}
+
+function hasInsecureOriginRule(allowlist: NonNullable<ReturnType<typeof parseOriginAllowlist>>): boolean {
+  for (const exactOrigin of allowlist.exact) {
+    try {
+      const url = new URL(exactOrigin);
+      if (url.protocol !== "https:") {
+        return true;
+      }
+    } catch {
+      return true;
+    }
+  }
+
+  return allowlist.wildcard.some((rule) => rule.protocol !== "https:");
+}
+
+function readMaintainerCredential(headers: Headers): string | null {
+  const headerKey = headers.get("x-maintainer-api-key");
+  if (headerKey && headerKey.trim().length > 0) {
+    return headerKey.trim();
+  }
+  return parseBearerToken(headers.get("authorization"));
+}
+
+function constantTimeEquals(left: string, right: string): boolean {
+  const leftBuffer = createHash("sha256").update(left, "utf8").digest();
+  const rightBuffer = createHash("sha256").update(right, "utf8").digest();
+  return timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function exposeError(error: unknown, isProduction: boolean): string {
+  if (isProduction) {
+    return "Maintainer request failed.";
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+function buildZeroHashes(): bigint[] {
+  const hashes = [0n];
+  for (let level = 0; level < TREE_DEPTH; level++) {
+    hashes.push(poseidon2Bls([hashes[level], hashes[level]]));
+  }
+  return hashes;
+}
+
+function computeMerkleRoot(leaves: bigint[]): bigint {
+  if (leaves.length > (1 << TREE_DEPTH)) {
+    throw new Error("Leaf count exceeds Merkle tree capacity.");
+  }
+
+  let currentLevel = leaves.slice();
+  for (let level = 0; level < TREE_DEPTH; level++) {
+    if (currentLevel.length === 0) {
+      return ZERO_HASHES[TREE_DEPTH];
+    }
+
+    const nextLevel: bigint[] = [];
+    const zero = ZERO_HASHES[level];
+    for (let i = 0; i < currentLevel.length; i += 2) {
+      const left = currentLevel[i];
+      if (typeof left !== "bigint") {
+        throw new Error("Merkle tree leaf is missing.");
+      }
+      const right = i + 1 < currentLevel.length ? currentLevel[i + 1] : zero;
+      nextLevel.push(poseidon2Bls([left, right]));
+    }
+    currentLevel = nextLevel;
+  }
+
+  const root = currentLevel[0];
+  if (typeof root !== "bigint") {
+    throw new Error("Merkle root derivation failed.");
+  }
+  return root;
+}
+
+function toRootHex(root: bigint): string {
+  let rootHex = root.toString(16);
+  while (rootHex.length < 64) rootHex = `0${rootHex}`;
+  return rootHex;
+}
+
+function parseRpcInteger(item: RpcStackItem, fieldName: string): number {
+  const raw = item.value;
+  let parsed: bigint;
+  if (typeof raw === "string") {
+    if (!/^-?\d+$/.test(raw)) {
+      throw new Error(`${fieldName} is not a valid integer.`);
+    }
+    parsed = BigInt(raw);
+  } else if (typeof raw === "number") {
+    if (!Number.isSafeInteger(raw)) {
+      throw new Error(`${fieldName} is not a safe integer.`);
+    }
+    parsed = BigInt(raw);
+  } else if (typeof raw === "bigint") {
+    parsed = raw;
+  } else {
+    throw new Error(`${fieldName} integer value is missing.`);
+  }
+
+  if (parsed < 0n) {
+    throw new Error(`${fieldName} cannot be negative.`);
+  }
+  if (parsed > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`${fieldName} exceeds supported range.`);
+  }
+  return Number(parsed);
+}
+
+function parseRpcByteArrayHex(item: RpcStackItem, fieldName: string, expectedBytes: number): string {
+  if (item.type !== "ByteString" && item.type !== "ByteArray" && item.type !== "Buffer") {
+    throw new Error(`${fieldName} must be a byte string.`);
+  }
+  if (typeof item.value !== "string") {
+    throw new Error(`${fieldName} byte payload is missing.`);
+  }
+  const hex = Buffer.from(item.value, "base64").toString("hex").toLowerCase();
+  if (!/^[0-9a-f]*$/.test(hex) || hex.length !== expectedBytes * 2) {
+    throw new Error(`${fieldName} must be ${expectedBytes} bytes.`);
+  }
+  return hex;
+}
+
+function assertInvokeSuccess(result: RpcInvokeResult, operation: string): RpcStackItem[] {
+  if (result.exception) {
+    throw new Error(`${operation} failed: ${result.exception}`);
+  }
+  if (typeof result.state === "string" && !result.state.startsWith("HALT")) {
+    throw new Error(`${operation} did not halt cleanly: ${result.state}`);
+  }
+  if (!Array.isArray(result.stack) || result.stack.length === 0) {
+    throw new Error(`${operation} returned an empty stack.`);
+  }
+  return result.stack as RpcStackItem[];
+}
+
+async function callContractInteger(
+  client: RpcClientInstance,
+  vaultHash: string,
+  operation: string,
+  args: unknown[] = [],
+): Promise<number> {
+  const response = await client.invokeFunction(vaultHash, operation, args);
+  const stack = assertInvokeSuccess(response, operation);
+  return parseRpcInteger(stack[0], operation);
+}
+
+async function callContractLeafHex(client: RpcClientInstance, vaultHash: string, index: number): Promise<string> {
+  const response = await client.invokeFunction(vaultHash, "getLeaf", [sc.ContractParam.integer(index)]);
+  const stack = assertInvokeSuccess(response, `getLeaf(${index})`);
+  return parseRpcByteArrayHex(stack[0], `leaf ${index}`, 32);
+}
+
+async function callContractRootHex(client: RpcClientInstance, vaultHash: string): Promise<string | null> {
+  const response = await client.invokeFunction(vaultHash, "getCurrentRoot", []);
+  const stack = assertInvokeSuccess(response, "getCurrentRoot");
+  const item = stack[0];
+  if (item.type !== "ByteString" && item.type !== "ByteArray" && item.type !== "Buffer") {
+    throw new Error("current root must be a byte string.");
+  }
+  if (typeof item.value !== "string") {
+    throw new Error("current root byte payload is missing.");
+  }
+  const hex = Buffer.from(item.value, "base64").toString("hex").toLowerCase();
+  if (hex.length === 0) {
+    return null;
+  }
+  if (!HEX32_RE.test(hex)) {
+    throw new Error("current root must be 32 bytes.");
+  }
+  return hex;
+}
+
+function normalizeLeafHash(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!HEX32_RE.test(normalized)) return null;
+  return normalized;
+}
+
+async function loadLeafCache(leafCount: number): Promise<Map<number, string>> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("deposits")
+    .select("leaf_index, leaf_hash")
+    .lt("leaf_index", leafCount)
+    .order("leaf_index", { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to read Supabase leaves: ${error.message}`);
+  }
+
+  const leaves = new Map<number, string>();
+  for (const row of data || []) {
+    const entry = row as Record<string, unknown>;
+    const rawIndex = entry["leaf_index"];
+    const index = typeof rawIndex === "number" ? rawIndex : Number(rawIndex);
+    if (!Number.isSafeInteger(index) || index < 0 || index >= leafCount) {
+      continue;
+    }
+    const hash = normalizeLeafHash(entry["leaf_hash"]);
+    if (!hash) {
+      continue;
+    }
+    const existing = leaves.get(index);
+    if (existing && existing !== hash) {
+      throw new Error(`Conflicting cached leaf hash at index ${index}.`);
+    }
+    leaves.set(index, hash);
+  }
+
+  return leaves;
+}
+
+async function persistLeaves(rows: Array<{ leaf_index: number; leaf_hash: string }>): Promise<void> {
+  if (rows.length === 0) {
+    return;
+  }
+
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase.from("deposits").upsert(rows, { onConflict: "leaf_index" });
+  if (error) {
+    throw new Error(`Failed to persist Supabase leaves: ${error.message}`);
+  }
+}
+
+function buildMissingIndices(cache: Map<number, string>, leafCount: number): number[] {
+  const missing: number[] = [];
+  for (let index = 0; index < leafCount; index++) {
+    if (!cache.has(index)) {
+      missing.push(index);
+    }
+  }
+  return missing;
+}
+
+async function fetchLeavesForIndices(
+  client: RpcClientInstance,
+  vaultHash: string,
+  indices: number[],
+  concurrency: number,
+): Promise<Map<number, string>> {
+  const result = new Map<number, string>();
+  if (indices.length === 0) {
+    return result;
+  }
+
+  let cursor = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, indices.length));
+
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const index = indices[cursor];
+      cursor += 1;
+      if (typeof index !== "number") {
+        break;
+      }
+
+      const leafHash = await callContractLeafHex(client, vaultHash, index);
+      result.set(index, leafHash);
+    }
+  });
+
+  await Promise.all(workers);
+  return result;
+}
+
+function assembleLeaves(cache: Map<number, string>, leafCount: number): bigint[] {
+  const leaves: bigint[] = new Array<bigint>(leafCount);
+  for (let index = 0; index < leafCount; index++) {
+    const hash = cache.get(index);
+    if (!hash) {
+      throw new Error(`Leaf cache is incomplete at index ${index}.`);
+    }
+    leaves[index] = BigInt(`0x${hash}`);
+  }
+  return leaves;
+}
+
+function cleanupMemoryLocks(now: number): void {
+  for (const [key, expiresAt] of inMemoryLocks.entries()) {
+    if (expiresAt <= now) {
+      inMemoryLocks.delete(key);
+    }
+  }
+}
+
+function acquireMemoryLock(key: string, ttlMs: number): boolean {
+  const now = Date.now();
+  cleanupMemoryLocks(now);
+
+  const existing = inMemoryLocks.get(key);
+  if (typeof existing === "number" && existing > now) {
+    return false;
+  }
+
+  inMemoryLocks.set(key, now + ttlMs);
+  return true;
+}
+
+function releaseMemoryLock(key: string): void {
+  inMemoryLocks.delete(key);
+}
+
+function createRedisClient(config: MaintainerConfig): Redis | null {
+  if (!config.kvRestApiUrl || !config.kvRestApiToken) {
+    return null;
+  }
+  return new Redis({ url: config.kvRestApiUrl, token: config.kvRestApiToken });
+}
+
+async function acquireDurableLock(redisClient: Redis | null, key: string, ttlMs: number): Promise<boolean> {
+  if (!redisClient) {
+    throw new Error("Durable lock is not configured.");
+  }
+  const result = await redisClient.set(key, "1", { nx: true, px: ttlMs });
+  return result === "OK";
+}
+
+async function releaseDurableLock(redisClient: Redis | null, key: string): Promise<void> {
+  if (!redisClient) return;
+  await redisClient.del(key);
+}
+
+async function acquireRunLock(config: MaintainerConfig, lockKey: string, redisClient: Redis | null): Promise<boolean> {
+  if (config.guardStoreMode === "durable") {
+    return acquireDurableLock(redisClient, lockKey, config.lockTtlMs);
+  }
+  return acquireMemoryLock(lockKey, config.lockTtlMs);
+}
+
+async function releaseRunLock(config: MaintainerConfig, lockKey: string, redisClient: Redis | null): Promise<void> {
+  if (config.guardStoreMode === "durable") {
+    await releaseDurableLock(redisClient, lockKey);
+    return;
+  }
+  releaseMemoryLock(lockKey);
+}
+
+function parseConfig(): MaintainerConfig {
+  const nodeEnv = (process.env.NODE_ENV || "").trim().toLowerCase();
+  const vercelEnv = (process.env.VERCEL_ENV || "").trim().toLowerCase();
+  const isProduction = vercelEnv === "production" || (nodeEnv === "production" && vercelEnv.length === 0);
+
+  const rpcUrl =
+    process.env.MAINTAINER_RPC_URL ||
+    process.env.RPC_URL ||
+    process.env.NEXT_PUBLIC_RPC_URL ||
+    "https://testnet1.neo.coz.io:443";
+  const rawVaultHash =
+    process.env.MAINTAINER_VAULT_HASH ||
+    process.env.VAULT_HASH ||
+    process.env.NEXT_PUBLIC_VAULT_HASH ||
+    "";
+  const maintainerWif = process.env.MAINTAINER_WIF || "";
+  const maintainerApiKey = process.env.MAINTAINER_API_KEY || "";
+  const requireAuth = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_AUTH, isProduction);
+  const requireOriginAllowlist = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_ORIGIN_ALLOWLIST, false);
+  const requireDurableLock = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_DURABLE_LOCK, isProduction);
+  const allowedOriginsRaw = process.env.MAINTAINER_ALLOWED_ORIGINS || process.env.RELAYER_ALLOWED_ORIGINS || "";
+  const originAllowlist = parseOriginAllowlist(allowedOriginsRaw);
+  const maxSyncLeaves = parsePositiveIntEnv(process.env.MAINTAINER_MAX_SYNC_LEAVES, DEFAULT_MAX_SYNC_LEAVES);
+  const chainFetchConcurrency = parsePositiveIntEnv(
+    process.env.MAINTAINER_CHAIN_FETCH_CONCURRENCY,
+    DEFAULT_CHAIN_FETCH_CONCURRENCY,
+  );
+  const lockTtlMs = parsePositiveIntEnv(process.env.MAINTAINER_LOCK_TTL_MS, DEFAULT_LOCK_TTL_MS);
+  const kvRestApiUrl = process.env.KV_REST_API_URL || "";
+  const kvRestApiToken = process.env.KV_REST_API_TOKEN || "";
+  const guardStoreMode: GuardStoreMode =
+    kvRestApiUrl.trim().length > 0 && kvRestApiToken.trim().length > 0 ? "durable" : "memory";
+
+  const vaultHash = rawVaultHash.trim();
+
+  return {
+    rpcUrl,
+    vaultHash,
+    maintainerWif,
+    maintainerApiKey,
+    requireAuth,
+    requireOriginAllowlist,
+    requireDurableLock,
+    originAllowlist,
+    isProduction,
+    guardStoreMode,
+    lockTtlMs,
+    maxSyncLeaves,
+    chainFetchConcurrency,
+    kvRestApiUrl,
+    kvRestApiToken,
+  };
+}
+
+function validateConfig(config: MaintainerConfig): string[] {
+  const issues: string[] = [];
+
+  if (!hasSecureRpcTransport(config.rpcUrl)) {
+    issues.push("MAINTAINER_RPC_URL/RPC_URL must use https:// or wss://.");
+  }
+
+  if (!config.vaultHash) {
+    issues.push("MAINTAINER_VAULT_HASH/VAULT_HASH is required.");
+  } else {
+    try {
+      config.vaultHash = normalizeHash160(config.vaultHash, "MAINTAINER_VAULT_HASH/VAULT_HASH");
+    } catch {
+      issues.push("MAINTAINER_VAULT_HASH/VAULT_HASH must be a valid 20-byte script hash.");
+    }
+  }
+
+  if (!config.maintainerWif) {
+    issues.push("MAINTAINER_WIF is required.");
+  } else {
+    try {
+      void new wallet.Account(config.maintainerWif);
+    } catch {
+      issues.push("MAINTAINER_WIF is invalid.");
+    }
+  }
+
+  if (config.requireAuth && !config.maintainerApiKey) {
+    issues.push("MAINTAINER_API_KEY is required when MAINTAINER_REQUIRE_AUTH=true.");
+  }
+
+  if (config.requireOriginAllowlist && !config.originAllowlist) {
+    issues.push("MAINTAINER_ALLOWED_ORIGINS is required when MAINTAINER_REQUIRE_ORIGIN_ALLOWLIST=true.");
+  }
+
+  if (config.requireDurableLock && config.guardStoreMode !== "durable") {
+    issues.push("Durable lock storage is required. Configure KV_REST_API_URL and KV_REST_API_TOKEN.");
+  }
+
+  if (config.isProduction && !config.requireAuth) {
+    issues.push("MAINTAINER_REQUIRE_AUTH must be true in production.");
+  }
+
+  if (config.isProduction && !config.requireDurableLock) {
+    issues.push("MAINTAINER_REQUIRE_DURABLE_LOCK must be true in production.");
+  }
+
+  if (config.isProduction && config.originAllowlist && hasInsecureOriginRule(config.originAllowlist)) {
+    issues.push("MAINTAINER_ALLOWED_ORIGINS must only contain https origins in production.");
+  }
+
+  return issues;
+}
+
+async function appendRootMetadata(leafCount: number, rootHash: string, txHash: string): Promise<string | null> {
+  const supabase = getSupabaseAdminClient();
+  const { error } = await supabase.from("merkle_roots").insert({
+    leaf_count: leafCount,
+    root_hash: rootHash,
+    tx_hash: txHash,
+  });
+  if (error) {
+    return error.message;
+  }
+  return null;
+}
+
+export async function POST(req: Request) {
+  let config: MaintainerConfig | null = null;
+  let redisClient: Redis | null = null;
+  let lockKey: string | null = null;
+  let lockHeld = false;
+
   try {
-    const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || "https://testnet1.neo.coz.io:443";
-    const vaultHash = process.env.NEXT_PUBLIC_VAULT_HASH;
-    const maintainerWif = process.env.MAINTAINER_WIF;
-
-    if (!vaultHash || !maintainerWif) {
-      return NextResponse.json({ error: "Missing maintainer configuration (VAULT_HASH or MAINTAINER_WIF)." }, { status: 500 });
+    config = parseConfig();
+    const issues = validateConfig(config);
+    if (issues.length > 0) {
+      return NextResponse.json(
+        { error: "Maintainer is not fully configured.", issues },
+        { status: 503 },
+      );
     }
 
-    const account = new wallet.Account(maintainerWif);
-    const rpcClient = new rpc.RPCClient(rpcUrl);
-
-    // Fetch total leaves from contract
-    const leafCountRes = await rpcClient.invokeFunction(vaultHash, "getLeafIndex", []);
-    const leafCount = parseInt(leafCountRes.stack[0].value as string, 10) || 0;
-
-    // Fetch the last known root leaf count from contract
-    const lastCountRes = await rpcClient.invokeFunction(vaultHash, "getLastRootLeafCount", []);
-    const lastCount = parseInt(lastCountRes.stack[0].value as string, 10) || 0;
-
-    if (leafCount <= lastCount) {
-        return NextResponse.json({ message: "Tree is already up to date.", currentLeaves: leafCount });
+    if (config.requireOriginAllowlist && !isOriginAllowed(req.headers, config.originAllowlist)) {
+      return NextResponse.json({ error: "Origin not allowed." }, { status: 403 });
     }
 
-    // Determine how many leaves are missing locally in Supabase
-    const { count: localLeafCount, error: countErr } = await supabase
-      .from('deposits')
-      .select('*', { count: 'exact', head: true });
-      
-    if (countErr) {
-       console.error("Supabase count error:", countErr);
+    if (config.requireAuth) {
+      const credential = readMaintainerCredential(req.headers);
+      if (!credential || !constantTimeEquals(credential, config.maintainerApiKey)) {
+        return NextResponse.json({ error: "Missing or invalid maintainer API key." }, { status: 401 });
+      }
     }
-    
-    const dbLeavesCount = localLeafCount || 0;
-    
-    // Fetch missing leaves from on-chain and store them
-    const newLeavesToInsert = [];
-    for (let i = dbLeavesCount; i < leafCount; i++) {
-        const leafRes = await rpcClient.invokeFunction(vaultHash, "getLeaf", [sc.ContractParam.integer(i)]);
-        const hex = Buffer.from(leafRes.stack[0].value as string, 'base64').toString('hex');
-        newLeavesToInsert.push({ leaf_index: i, leaf_hash: hex });
+
+    // Validate Supabase configuration before touching chain state.
+    void getSupabaseAdminClient();
+
+    redisClient = createRedisClient(config);
+    lockKey = `znep17:maintainer-lock:${config.vaultHash}`;
+    lockHeld = await acquireRunLock(config, lockKey, redisClient);
+    if (!lockHeld) {
+      return NextResponse.json(
+        { error: "Maintainer update already in progress. Retry shortly." },
+        { status: 409 },
+      );
     }
-    
-    if (newLeavesToInsert.length > 0) {
-        const { error: insertErr } = await supabase.from('deposits').insert(newLeavesToInsert);
-        if (insertErr) {
-            throw new Error(`Failed to save leaves to Supabase: ${insertErr.message}`);
+
+    const account = new wallet.Account(config.maintainerWif);
+    const rpcClient = new rpc.RPCClient(config.rpcUrl);
+    const vaultHashPrefixed = `0x${config.vaultHash}`;
+
+    const leafCount = await callContractInteger(rpcClient, vaultHashPrefixed, "getLeafIndex");
+    const lastRootLeafCount = await callContractInteger(rpcClient, vaultHashPrefixed, "getLastRootLeafCount");
+    const currentRootHex = await callContractRootHex(rpcClient, vaultHashPrefixed);
+
+    if (leafCount <= lastRootLeafCount) {
+      return NextResponse.json({
+        success: true,
+        message: "Tree is already up to date.",
+        currentLeaves: leafCount,
+      });
+    }
+
+    const leafCache = await loadLeafCache(leafCount);
+    let missingIndices = buildMissingIndices(leafCache, leafCount);
+    if (missingIndices.length > config.maxSyncLeaves) {
+      return NextResponse.json(
+        {
+          error: `Supabase cache is missing ${missingIndices.length} leaves, exceeding MAINTAINER_MAX_SYNC_LEAVES=${config.maxSyncLeaves}.`,
+        },
+        { status: 503 },
+      );
+    }
+
+    if (missingIndices.length > 0) {
+      const fetched = await fetchLeavesForIndices(
+        rpcClient,
+        vaultHashPrefixed,
+        missingIndices,
+        config.chainFetchConcurrency,
+      );
+      const toPersist: Array<{ leaf_index: number; leaf_hash: string }> = [];
+      for (const index of missingIndices) {
+        const leafHash = fetched.get(index);
+        if (!leafHash) {
+          throw new Error(`Failed to fetch missing leaf ${index}.`);
         }
+        leafCache.set(index, leafHash);
+        toPersist.push({ leaf_index: index, leaf_hash: leafHash });
+      }
+      await persistLeaves(toPersist);
+      missingIndices = buildMissingIndices(leafCache, leafCount);
+      if (missingIndices.length > 0) {
+        throw new Error("Leaf cache is still incomplete after sync.");
+      }
     }
 
-    // Now query ALL leaves from Supabase to construct the tree
-    const { data: allLeavesData, error: fetchErr } = await supabase
-      .from('deposits')
-      .select('leaf_index, leaf_hash')
-      .order('leaf_index', { ascending: true });
-      
-    if (fetchErr || !allLeavesData) {
-        throw new Error(`Failed to fetch leaves from Supabase: ${fetchErr?.message}`);
+    const leaves = assembleLeaves(leafCache, leafCount);
+
+    if (lastRootLeafCount > 0) {
+      if (!currentRootHex) {
+        throw new Error("Current root is missing while lastRootLeafCount is non-zero.");
+      }
+      const prefixRoot = computeMerkleRoot(leaves.slice(0, lastRootLeafCount));
+      const prefixRootHex = toRootHex(prefixRoot);
+      if (prefixRootHex !== currentRootHex) {
+        throw new Error(
+          "Cached leaves do not match current on-chain root. Rebuild the cache before publishing a new root.",
+        );
+      }
     }
 
-    // Map to BigInts
-    const leaves = allLeavesData.map(d => BigInt("0x" + d.leaf_hash));
+    const newRoot = computeMerkleRoot(leaves);
+    const newRootHex = toRootHex(newRoot);
 
-    const MERKLE_DEPTH = 20;
-    let currentLevel = leaves;
-    let emptyHash = 0n;
-
-    for (let level = 0; level < MERKLE_DEPTH; level++) {
-        const nextLevel: bigint[] = [];
-        for (let i = 0; i < currentLevel.length; i += 2) {
-            const left = currentLevel[i];
-            const right = i + 1 < currentLevel.length ? currentLevel[i + 1] : emptyHash;
-            nextLevel.push(poseidon2Bls([left, right]));
-        }
-        emptyHash = poseidon2Bls([emptyHash, emptyHash]);
-        currentLevel = nextLevel;
+    const latestLeafCount = await callContractInteger(rpcClient, vaultHashPrefixed, "getLeafIndex");
+    const latestLastRootLeafCount = await callContractInteger(rpcClient, vaultHashPrefixed, "getLastRootLeafCount");
+    if (latestLeafCount !== leafCount || latestLastRootLeafCount !== lastRootLeafCount) {
+      return NextResponse.json(
+        {
+          error: "Chain state changed while computing root. Retry update to avoid publishing stale data.",
+          previousLeafCount: leafCount,
+          currentLeafCount: latestLeafCount,
+        },
+        { status: 409 },
+      );
     }
-
-    const newRoot = currentLevel[0];
-    let newRootHex = newRoot.toString(16);
-    while (newRootHex.length < 64) newRootHex = "0" + newRootHex;
-
-    // Send transaction to N3
-    const script = sc.createScript({
-        scriptHash: vaultHash,
-        operation: "updateMerkleRoot",
-        args: [sc.ContractParam.byteArray(newRootHex)]
-    });
-
-    const currentHeight = await rpcClient.getBlockCount();
-    const transaction = new tx.Transaction({
-        signers: [
-            {
-                account: account.scriptHash,
-                scopes: tx.WitnessScope.CalledByEntry
-            }
-        ],
-        validUntilBlock: currentHeight + 1000,
-        script
-    });
-
-    const networkFee = await rpcClient.calculateNetworkFee(transaction);
-    transaction.networkFee = u.BigInteger.fromNumber(networkFee);
-    transaction.systemFee = u.BigInteger.fromNumber(100000000); 
 
     const versionRes = await rpcClient.getVersion();
     const networkMagic = versionRes.protocol.network;
-    const signedTx = transaction.sign(account, networkMagic);
-    const txid = await rpcClient.sendRawTransaction(signedTx);
-    
-    // Save the new root to DB
-    await supabase.from('merkle_roots').insert({
-        leaf_count: leafCount,
-        root_hash: newRootHex,
-        tx_hash: txid
-    });
+    const contract = new experimental.SmartContract(
+      vaultHashPrefixed as unknown as import("@cityofzion/neon-core").u.HexString,
+      {
+        networkMagic,
+        rpcAddress: config.rpcUrl,
+        account,
+      },
+    );
 
-    return NextResponse.json({ 
-        success: true, 
-        message: "Merkle root updated successfully.", 
-        txid, 
-        newRoot: newRootHex,
-        leavesProcessed: leafCount
-    });
+    const signers = [
+      new tx.Signer({
+        account: account.scriptHash,
+        scopes: tx.WitnessScope.CalledByEntry,
+      }),
+    ];
 
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: errorMsg }, { status: 500 });
+    const rootPayload = Buffer.from(newRootHex, "hex").toString("base64");
+    const txid = await contract.invoke(
+      "updateMerkleRoot",
+      [sc.ContractParam.byteArray(rootPayload), sc.ContractParam.integer(leafCount)],
+      signers,
+    );
+
+    const metadataWarning = await appendRootMetadata(leafCount, newRootHex, txid);
+
+    return NextResponse.json({
+      success: true,
+      message: "Merkle root updated successfully.",
+      txid,
+      newRoot: newRootHex,
+      leavesProcessed: leafCount,
+      ...(metadataWarning ? { warning: `Root published but metadata insert failed: ${metadataWarning}` } : {}),
+    });
+  } catch (error: unknown) {
+    const isProduction = config?.isProduction ?? false;
+    console.error("Maintainer Error:", error instanceof Error ? error.message : String(error));
+    return NextResponse.json(
+      {
+        success: false,
+        error: exposeError(error, isProduction),
+      },
+      { status: 500 },
+    );
+  } finally {
+    if (config && lockKey && lockHeld) {
+      try {
+        await releaseRunLock(config, lockKey, redisClient);
+      } catch (releaseError: unknown) {
+        console.error(
+          "Failed to release maintainer lock:",
+          releaseError instanceof Error ? releaseError.message : String(releaseError),
+        );
+      }
+    }
   }
 }

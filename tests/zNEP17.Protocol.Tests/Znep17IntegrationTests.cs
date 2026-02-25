@@ -29,6 +29,7 @@ public class Znep17IntegrationTests
             byte[]? publicInputs,
             byte[]? merkleRoot,
             byte[]? nullifierHash,
+            byte[]? commitment,
             UInt160? recipient,
             UInt160? relayer,
             BigInteger? amount,
@@ -92,6 +93,7 @@ public class Znep17IntegrationTests
             BuildPublicInputsPayload(),
             root,
             nullifier,
+            leaf,
             recipient.Account,
             relayer.Account,
             10,
@@ -112,6 +114,7 @@ public class Znep17IntegrationTests
                 BuildPublicInputsPayload(),
                 root,
                 nullifier,
+                leaf,
                 recipient.Account,
                 relayer.Account,
                 10,
@@ -171,6 +174,7 @@ public class Znep17IntegrationTests
                 BuildPublicInputsPayload(),
                 root,
                 nullifier,
+                leaf,
                 recipient.Account,
                 owner.Account,
                 10,
@@ -184,13 +188,198 @@ public class Znep17IntegrationTests
     }
 
     [Fact]
-    public void Withdraw_Rejects_WhenRequestedAmountDoesNotMatchDepositedNote() { }
+    public void Withdraw_Rejects_WhenCommitmentIsUnknown()
+    {
+        var engine = new TestEngine(true);
+        Signer owner = TestEngine.GetNewSigner();
+        Signer depositor = TestEngine.GetNewSigner();
+        Signer recipient = TestEngine.GetNewSigner();
+        Signer relayer = TestEngine.GetNewSigner();
+        UInt160 stealth = TestEngine.GetNewSigner().Account;
+
+        engine.SetTransactionSigners(owner);
+        var vault = engine.Deploy<Neo.SmartContract.Testing.zNEP17Protocol>(
+            Neo.SmartContract.Testing.zNEP17Protocol.Nef,
+            Neo.SmartContract.Testing.zNEP17Protocol.Manifest,
+            null);
+
+        var asset = engine.Deploy<Neo.SmartContract.Testing.TestNep17Token>(
+            Neo.SmartContract.Testing.TestNep17Token.Nef,
+            Neo.SmartContract.Testing.TestNep17Token.Manifest,
+            null);
+        asset.MintForTesting(depositor.Account, 100);
+
+        int verifyCalls = 0;
+        var verifier = DeployMockVerifier(engine, proof =>
+        {
+            verifyCalls++;
+            return proof is not null && proof.Length == PrivacyGuards.Groth16ProofLength;
+        });
+
+        engine.SetTransactionSigners(owner);
+        vault.Verifier = verifier.Hash;
+        vault.Relayer = relayer.Account;
+        vault.SetAssetAllowed(asset.Hash, true);
+        vault.TreeMaintainer = owner.Account;
+
+        byte[] knownCommitment = NewFixedBytes(0x61);
+        engine.SetTransactionSigners(depositor);
+        asset.Transfer(depositor.Account, vault.Hash, 10, new object[] { stealth, knownCommitment });
+        byte[] root = PublishRoot(engine, vault, owner, 0x62);
+        byte[] nullifier = NewFixedBytes(0x63);
+        byte[] unknownCommitment = NewFixedBytes(0x64);
+
+        engine.SetTransactionSigners(relayer);
+        Assert.Throws<TestException>(() =>
+            vault.Withdraw(
+                asset.Hash,
+                BuildProofPayload(0x01),
+                BuildPublicInputsPayload(),
+                root,
+                nullifier,
+                unknownCommitment,
+                recipient.Account,
+                relayer.Account,
+                10,
+                1));
+
+        Assert.Equal(0, verifyCalls);
+        Assert.Equal(new BigInteger(10), RequireBigInteger(vault.GetAssetEscrowBalance(asset.Hash)));
+        Assert.False(RequireBool(vault.IsNullifierUsed(nullifier)));
+    }
 
     [Fact]
-    public void Withdraw_Rejects_WhenUsingRootFromDifferentAssetDomain() { }
+    public void Withdraw_Rejects_WhenCommitmentAlreadySpent()
+    {
+        var engine = new TestEngine(true);
+        Signer owner = TestEngine.GetNewSigner();
+        Signer depositor = TestEngine.GetNewSigner();
+        Signer recipient = TestEngine.GetNewSigner();
+        Signer relayer = TestEngine.GetNewSigner();
+        UInt160 stealth = TestEngine.GetNewSigner().Account;
+
+        engine.SetTransactionSigners(owner);
+        var vault = engine.Deploy<Neo.SmartContract.Testing.zNEP17Protocol>(
+            Neo.SmartContract.Testing.zNEP17Protocol.Nef,
+            Neo.SmartContract.Testing.zNEP17Protocol.Manifest,
+            null);
+
+        var asset = engine.Deploy<Neo.SmartContract.Testing.TestNep17Token>(
+            Neo.SmartContract.Testing.TestNep17Token.Nef,
+            Neo.SmartContract.Testing.TestNep17Token.Manifest,
+            null);
+        asset.MintForTesting(depositor.Account, 100);
+
+        int verifyCalls = 0;
+        var verifier = DeployMockVerifier(engine, proof =>
+        {
+            verifyCalls++;
+            return proof is not null && proof.Length == PrivacyGuards.Groth16ProofLength && proof[0] == 0x01;
+        });
+
+        engine.SetTransactionSigners(owner);
+        vault.Verifier = verifier.Hash;
+        vault.Relayer = relayer.Account;
+        vault.SetAssetAllowed(asset.Hash, true);
+        vault.TreeMaintainer = owner.Account;
+
+        byte[] commitment = NewFixedBytes(0x71);
+        engine.SetTransactionSigners(depositor);
+        asset.Transfer(depositor.Account, vault.Hash, 10, new object[] { stealth, commitment });
+        byte[] root = PublishRoot(engine, vault, owner, 0x72);
+
+        byte[] nullifierA = NewFixedBytes(0x73);
+        byte[] nullifierB = NewFixedBytes(0x74);
+
+        engine.SetTransactionSigners(relayer);
+        vault.Withdraw(
+            asset.Hash,
+            BuildProofPayload(0x01),
+            BuildPublicInputsPayload(),
+            root,
+            nullifierA,
+            commitment,
+            recipient.Account,
+            relayer.Account,
+            10,
+            1);
+
+        Assert.Throws<TestException>(() =>
+            vault.Withdraw(
+                asset.Hash,
+                BuildProofPayload(0x01),
+                BuildPublicInputsPayload(),
+                root,
+                nullifierB,
+                commitment,
+                recipient.Account,
+                relayer.Account,
+                10,
+                1));
+
+        Assert.Equal(1, verifyCalls);
+        Assert.False(RequireBool(vault.IsNullifierUsed(nullifierB)));
+    }
 
     [Fact]
-    public void Withdraw_Rejects_WhenRootPredatesCommitment_ThenSucceedsAfterRootRefresh() { }
+    public void Withdraw_Rejects_WhenRelayerDoesNotMatchConfiguredAddress()
+    {
+        var engine = new TestEngine(true);
+        Signer owner = TestEngine.GetNewSigner();
+        Signer depositor = TestEngine.GetNewSigner();
+        Signer recipient = TestEngine.GetNewSigner();
+        Signer configuredRelayer = TestEngine.GetNewSigner();
+        Signer unauthorizedRelayer = TestEngine.GetNewSigner();
+        UInt160 stealth = TestEngine.GetNewSigner().Account;
+
+        engine.SetTransactionSigners(owner);
+        var vault = engine.Deploy<Neo.SmartContract.Testing.zNEP17Protocol>(
+            Neo.SmartContract.Testing.zNEP17Protocol.Nef,
+            Neo.SmartContract.Testing.zNEP17Protocol.Manifest,
+            null);
+
+        var asset = engine.Deploy<Neo.SmartContract.Testing.TestNep17Token>(
+            Neo.SmartContract.Testing.TestNep17Token.Nef,
+            Neo.SmartContract.Testing.TestNep17Token.Manifest,
+            null);
+        asset.MintForTesting(depositor.Account, 100);
+
+        int verifyCalls = 0;
+        var verifier = DeployMockVerifier(engine, proof =>
+        {
+            verifyCalls++;
+            return proof is not null && proof.Length == PrivacyGuards.Groth16ProofLength;
+        });
+
+        engine.SetTransactionSigners(owner);
+        vault.Verifier = verifier.Hash;
+        vault.Relayer = configuredRelayer.Account;
+        vault.SetAssetAllowed(asset.Hash, true);
+        vault.TreeMaintainer = owner.Account;
+
+        byte[] commitment = NewFixedBytes(0x81);
+        engine.SetTransactionSigners(depositor);
+        asset.Transfer(depositor.Account, vault.Hash, 10, new object[] { stealth, commitment });
+        byte[] root = PublishRoot(engine, vault, owner, 0x82);
+        byte[] nullifier = NewFixedBytes(0x83);
+
+        engine.SetTransactionSigners(unauthorizedRelayer);
+        Assert.Throws<TestException>(() =>
+            vault.Withdraw(
+                asset.Hash,
+                BuildProofPayload(0x01),
+                BuildPublicInputsPayload(),
+                root,
+                nullifier,
+                commitment,
+                recipient.Account,
+                unauthorizedRelayer.Account,
+                10,
+                1));
+
+        Assert.Equal(0, verifyCalls);
+        Assert.False(RequireBool(vault.IsNullifierUsed(nullifier)));
+    }
 
     private static MockVerifierContract DeployMockVerifier(
         TestEngine engine,
@@ -205,7 +394,8 @@ public class Znep17IntegrationTests
             ("publicInputs", ContractParameterType.ByteArray),
             ("merkleRoot", ContractParameterType.ByteArray),
             ("nullifierHash", ContractParameterType.ByteArray),
-                        ("recipient", ContractParameterType.Hash160),
+            ("commitment", ContractParameterType.ByteArray),
+            ("recipient", ContractParameterType.Hash160),
             ("relayer", ContractParameterType.Hash160),
             ("amount", ContractParameterType.Integer),
             ("fee", ContractParameterType.Integer));
@@ -222,13 +412,14 @@ public class Znep17IntegrationTests
                         It.IsAny<byte[]?>(),
                         It.IsAny<byte[]?>(),
                         It.IsAny<byte[]?>(),
+                        It.IsAny<byte[]?>(),
                         It.IsAny<UInt160?>(),
                         It.IsAny<UInt160?>(),
                         It.IsAny<BigInteger?>(),
                         It.IsAny<BigInteger?>()
                     ))
-                    .Returns<UInt160?, byte[]?, byte[]?, byte[]?, byte[]?, UInt160?, UInt160?, BigInteger?, BigInteger?>(
-                        (_, proof, _, _, _, _, _, _, _)  => verifyRule(proof));
+                    .Returns<UInt160?, byte[]?, byte[]?, byte[]?, byte[]?, byte[]?, UInt160?, UInt160?, BigInteger?, BigInteger?>(
+                        (_, proof, _, _, _, _, _, _, _, _)  => verifyRule(proof));
             });
     }
 
@@ -285,7 +476,8 @@ public class Znep17IntegrationTests
     {
         byte[] root = NewFixedBytes(rootSeed);
         engine.SetTransactionSigners(owner);
-        vault.UpdateMerkleRoot(root);
+        BigInteger leafCount = RequireBigInteger(vault.LeafIndex);
+        vault.UpdateMerkleRoot(root, leafCount);
         return root;
     }
 

@@ -36,10 +36,11 @@ public static class PrivacyGuards
         bool isAssetValid,
         bool isRecipientValid,
         bool isRelayerValid,
-        BigInteger amount,
+        BigInteger amountWithdraw,
         BigInteger fee,
         int rootLength,
         int nullifierLength,
+        int newCommitmentLength,
         int proofLength,
         int publicInputsLength)
     {
@@ -48,11 +49,12 @@ public static class PrivacyGuards
         return isAssetValid
             && isRecipientValid
             && hasValidRelayerIfNeeded
-            && amount > 0
+            && amountWithdraw > 0
             && fee >= 0
-            && amount > fee
+            && amountWithdraw > fee
             && rootLength == MerkleRootLength
             && nullifierLength == NullifierLength
+            && newCommitmentLength == LeafLength
             && proofLength == Groth16ProofLength
             && publicInputsLength == Groth16PublicInputsLength;
     }

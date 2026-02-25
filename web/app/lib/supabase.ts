@@ -1,8 +1,53 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder';
+let cachedClient: SupabaseClient | null = null;
 
-// Initialize the Supabase client with the service role key to bypass RLS policies
-// This should ONLY be used in server-side API routes, NEVER on the client.
-export const supabase = createClient(supabaseUrl, supabaseServiceKey);
+function readRequiredEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} is required.`);
+  }
+  return value;
+}
+
+function readSupabaseUrl(): string {
+  const directUrl = process.env.SUPABASE_URL?.trim();
+  const publicUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const url = directUrl || publicUrl;
+  if (!url) {
+    throw new Error("SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) is required.");
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("Supabase URL is invalid.");
+  }
+
+  if (parsed.protocol !== "https:") {
+    throw new Error("Supabase URL must use https://.");
+  }
+
+  return parsed.toString().replace(/\/+$/, "");
+}
+
+// Server-side privileged client for maintainer off-chain state updates.
+export function getSupabaseAdminClient(): SupabaseClient {
+  if (cachedClient) {
+    return cachedClient;
+  }
+
+  const supabaseUrl = readSupabaseUrl();
+  const supabaseServiceKey = readRequiredEnv("SUPABASE_SERVICE_ROLE_KEY");
+
+  cachedClient = createClient(supabaseUrl, supabaseServiceKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+
+  return cachedClient;
+}

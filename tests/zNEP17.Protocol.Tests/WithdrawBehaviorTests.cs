@@ -13,10 +13,11 @@ public class WithdrawBehaviorTests
             isAssetValid: true,
             isRecipientValid: true,
             isRelayerValid: true,
-            amount: 100,
+            amountWithdraw: 100,
             fee: 1,
             rootLength: 31,
             nullifierLength: PrivacyGuards.NullifierLength,
+            newCommitmentLength: PrivacyGuards.LeafLength,
             proofLength: PrivacyGuards.Groth16ProofLength,
             publicInputsLength: PrivacyGuards.Groth16PublicInputsLength);
 
@@ -24,10 +25,11 @@ public class WithdrawBehaviorTests
             isAssetValid: true,
             isRecipientValid: true,
             isRelayerValid: true,
-            amount: 100,
+            amountWithdraw: 100,
             fee: 1,
             rootLength: PrivacyGuards.MerkleRootLength,
             nullifierLength: 16,
+            newCommitmentLength: PrivacyGuards.LeafLength,
             proofLength: PrivacyGuards.Groth16ProofLength,
             publicInputsLength: PrivacyGuards.Groth16PublicInputsLength);
 
@@ -45,10 +47,11 @@ public class WithdrawBehaviorTests
             isAssetValid: true,
             isRecipientValid: true,
             isRelayerValid: true,
-            amount: 10,
+            amountWithdraw: 10,
             fee: 10,
             rootLength: PrivacyGuards.MerkleRootLength,
             nullifierLength: PrivacyGuards.NullifierLength,
+            newCommitmentLength: PrivacyGuards.LeafLength,
             proofLength: PrivacyGuards.Groth16ProofLength,
             publicInputsLength: PrivacyGuards.Groth16PublicInputsLength);
 
@@ -56,10 +59,11 @@ public class WithdrawBehaviorTests
             isAssetValid: true,
             isRecipientValid: true,
             isRelayerValid: true,
-            amount: 10,
+            amountWithdraw: 10,
             fee: -1,
             rootLength: PrivacyGuards.MerkleRootLength,
             nullifierLength: PrivacyGuards.NullifierLength,
+            newCommitmentLength: PrivacyGuards.LeafLength,
             proofLength: PrivacyGuards.Groth16ProofLength,
             publicInputsLength: PrivacyGuards.Groth16PublicInputsLength);
 
@@ -74,10 +78,11 @@ public class WithdrawBehaviorTests
             isAssetValid: true,
             isRecipientValid: true,
             isRelayerValid: false,
-            amount: 10,
+            amountWithdraw: 10,
             fee: 0,
             rootLength: PrivacyGuards.MerkleRootLength,
             nullifierLength: PrivacyGuards.NullifierLength,
+            newCommitmentLength: PrivacyGuards.LeafLength,
             proofLength: PrivacyGuards.Groth16ProofLength,
             publicInputsLength: PrivacyGuards.Groth16PublicInputsLength);
 
@@ -91,10 +96,11 @@ public class WithdrawBehaviorTests
             isAssetValid: true,
             isRecipientValid: true,
             isRelayerValid: true,
-            amount: 10,
+            amountWithdraw: 10,
             fee: 1,
             rootLength: PrivacyGuards.MerkleRootLength,
             nullifierLength: PrivacyGuards.NullifierLength,
+            newCommitmentLength: PrivacyGuards.LeafLength,
             proofLength: PrivacyGuards.MaxProofPayloadLength + 1,
             publicInputsLength: PrivacyGuards.Groth16PublicInputsLength);
 
@@ -108,10 +114,11 @@ public class WithdrawBehaviorTests
             isAssetValid: true,
             isRecipientValid: true,
             isRelayerValid: true,
-            amount: 10,
+            amountWithdraw: 10,
             fee: 1,
             rootLength: PrivacyGuards.MerkleRootLength,
             nullifierLength: PrivacyGuards.NullifierLength,
+            newCommitmentLength: PrivacyGuards.LeafLength,
             proofLength: PrivacyGuards.Groth16ProofLength - 1,
             publicInputsLength: PrivacyGuards.Groth16PublicInputsLength);
 
@@ -125,10 +132,11 @@ public class WithdrawBehaviorTests
             isAssetValid: true,
             isRecipientValid: true,
             isRelayerValid: true,
-            amount: 10,
+            amountWithdraw: 10,
             fee: 1,
             rootLength: PrivacyGuards.MerkleRootLength,
             nullifierLength: PrivacyGuards.NullifierLength,
+            newCommitmentLength: PrivacyGuards.LeafLength,
             proofLength: PrivacyGuards.Groth16ProofLength,
             publicInputsLength: PrivacyGuards.MaxPublicInputsPayloadLength + 1);
 
@@ -142,10 +150,11 @@ public class WithdrawBehaviorTests
             isAssetValid: true,
             isRecipientValid: true,
             isRelayerValid: true,
-            amount: 10,
+            amountWithdraw: 10,
             fee: 1,
             rootLength: PrivacyGuards.MerkleRootLength,
             nullifierLength: PrivacyGuards.NullifierLength,
+            newCommitmentLength: PrivacyGuards.LeafLength,
             proofLength: PrivacyGuards.Groth16ProofLength,
             publicInputsLength: PrivacyGuards.Groth16PublicInputsLength - 1);
 

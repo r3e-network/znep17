@@ -67,6 +67,7 @@ public class Znep17RealContractsIntegrationTests
             BuildPublicInputsPayload(),
             root,
             nullifier,
+            leaf,
             recipient.Account,
             relayer.Account,
             10,
@@ -131,6 +132,7 @@ public class Znep17RealContractsIntegrationTests
                 BuildPublicInputsPayload(),
                 root,
                 nullifier,
+                leaf,
                 recipient.Account,
                 owner.Account,
                 10,
@@ -193,6 +195,7 @@ public class Znep17RealContractsIntegrationTests
                 BuildPublicInputsPayload(),
                 unknownRoot,
                 nullifier,
+                leaf,
                 recipient.Account,
                 owner.Account,
                 10,
@@ -255,6 +258,7 @@ public class Znep17RealContractsIntegrationTests
                 BuildPublicInputsPayload(),
                 root,
                 nullifier,
+                leaf,
                 recipient.Account,
                 owner.Account,
                 10,
@@ -309,6 +313,7 @@ public class Znep17RealContractsIntegrationTests
                 BuildPublicInputsPayload(),
                 root,
                 nullifier,
+                leaf,
                 recipient.Account,
                 owner.Account,
                 10,
@@ -347,7 +352,8 @@ public class Znep17RealContractsIntegrationTests
     {
         byte[] root = NewFixedBytes(rootSeed);
         engine.SetTransactionSigners(owner);
-        vault.UpdateMerkleRoot(root);
+        BigInteger leafCount = RequireBigInteger(vault.LeafIndex);
+        vault.UpdateMerkleRoot(root, leafCount);
         return root;
     }
 

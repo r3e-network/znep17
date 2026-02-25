@@ -100,10 +100,6 @@ self.__SERVER_FILES_MANIFEST={
       }
     },
     "outputFileTracingRoot": "/home/neo/git/znep17/web",
-    "allowedDevOrigins": [
-      "127.0.0.1",
-      "localhost"
-    ],
     "cacheComponents": false,
     "cacheLife": {
       "default": {

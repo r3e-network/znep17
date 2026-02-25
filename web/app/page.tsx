@@ -269,22 +269,30 @@ export default function Home() {
   const [zkStatus, setZkStatus] = useState("");
   const [secretHex, setSecretHex] = useState("");
   const [nullifierPrivHex, setNullifierPrivHex] = useState("");
+  const [ticketAmount, setTicketAmount] = useState("");
+  const [ticketAsset, setTicketAsset] = useState("");
   const [copiedKey, setCopiedKey] = useState<"ticket" | "secret" | "nullifier" | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   
   const getTicketString = () => {
-    if (!secretHex || !nullifierPrivHex) return "";
-    return `znep17-${secretHex}-${nullifierPrivHex}`;
+    if (!secretHex || !nullifierPrivHex || !ticketAmount || !ticketAsset) return "";
+    return `znep17-${secretHex}-${nullifierPrivHex}-${ticketAmount}-${ticketAsset}`;
   };
 
   const handleTicketInput = (val: string) => {
     const parts = val.replace('znep17-', '').split('-');
-    if (parts.length === 2) {
+    if (parts.length === 4) {
+      setSecretHex(parts[0]);
+      setNullifierPrivHex(parts[1]);
+      setTicketAmount(parts[2]);
+      setTicketAsset(parts[3]);
+      setAmount(parts[2]); // Default withdraw amount to full amount
+      setTokenHash(parts[3]);
+    } else if (parts.length === 2) {
       setSecretHex(parts[0]);
       setNullifierPrivHex(parts[1]);
     } else {
-      // Just try to set it to secret if it's invalid so it doesn't break entirely, or do nothing
       setSecretHex(val);
     }
   };
@@ -388,8 +396,8 @@ export default function Home() {
        
        if (lsSecret) setSecretHex(lsSecret);
        if (lsNullifier) setNullifierPrivHex(lsNullifier);
-       if (lsAmount) setAmount(lsAmount);
-       if (lsToken) setTokenHash(lsToken);
+       if (lsAmount) { setAmount(lsAmount); setTicketAmount(lsAmount); }
+       if (lsToken) { setTokenHash(lsToken); setTicketAsset(lsToken); }
     }
   }, []);
 
@@ -595,6 +603,8 @@ export default function Home() {
       localStorage.setItem("znep17_last_nullifier", nul);
       localStorage.setItem("znep17_last_amount", amount);
       localStorage.setItem("znep17_last_token", tokenHash);
+      setTicketAmount(amount);
+      setTicketAsset(tokenHash);
       localStorage.setItem("znep17_has_pending", "true");
 
       if (!stealthAddress && account) {

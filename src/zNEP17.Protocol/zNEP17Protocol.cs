@@ -47,6 +47,8 @@ public class zNEP17Protocol : SmartContract
     private const byte PrefixLeaves = 0x03;
     private const byte PrefixAssetBalances = 0x04;
     private const byte PrefixRootHistory = 0x05;
+    private const byte PrefixCommitmentIndices = 0x06;
+    private const byte PrefixSpentCommitments = 0x07;
     private const byte PrefixAllowedAssets = 0x09;
     private const byte PrefixRootLeafCounts = 0x0B;
     private static readonly byte[] KeyOwner = new byte[] { 0x10 };
@@ -88,9 +90,6 @@ public class zNEP17Protocol : SmartContract
     {
         AssertOwnerWitness();
         Storage.Put(KeyPaused, paused ? new byte[] { 1 } : new byte[] { 0 });
-        if (!paused)
-        {
-            }
         OnPaused(paused);
     }
 
@@ -440,17 +439,19 @@ public class zNEP17Protocol : SmartContract
         Storage.Put(KeyTreeMaintainer, (byte[])maintainer);
     }
 
-    public static void UpdateMerkleRoot(byte[] newRoot)
+    public static void UpdateMerkleRoot(byte[] newRoot, BigInteger expectedLeafCount)
     {
         int rootLength = newRoot is null ? 0 : newRoot.Length;
         ExecutionEngine.Assert(rootLength == PrivacyGuards.MerkleRootLength, "invalid root length");
         ExecutionEngine.Assert(newRoot is not null, "root cannot be null");
+        ExecutionEngine.Assert(expectedLeafCount >= 0, "invalid expected leaf count");
 
         UInt160 maintainer = GetTreeMaintainer();
         ExecutionEngine.Assert(maintainer.IsValidAndNotZero, "tree maintainer not configured");
         ExecutionEngine.Assert(Runtime.CheckWitness(maintainer), "forbidden tree maintainer");
 
         BigInteger leafCount = GetLeafIndex();
+        ExecutionEngine.Assert(expectedLeafCount == leafCount, "leaf count changed");
         BigInteger lastRootLeafCount = GetLastRootLeafCount();
         ExecutionEngine.Assert(leafCount >= lastRootLeafCount, "leaf count regression");
         ExecutionEngine.Assert(
@@ -475,9 +476,10 @@ public class zNEP17Protocol : SmartContract
         byte[] publicInputs,
         byte[] merkleRoot,
         byte[] nullifierHash,
+        byte[] newCommitment,
         UInt160 recipient,
         UInt160 relayer,
-        BigInteger amount,
+        BigInteger amountWithdraw,
         BigInteger fee)
     {
         ExecutionEngine.Assert(!IsPaused(), "contract is paused");
@@ -485,6 +487,7 @@ public class zNEP17Protocol : SmartContract
         int rootLength = merkleRoot is null ? 0 : merkleRoot.Length;
         int nullifierLength = nullifierHash is null ? 0 : nullifierHash.Length;
         int proofLength = proof is null ? 0 : proof.Length;
+        int newCommitmentLength = newCommitment is null ? 0 : newCommitment.Length;
         int publicInputsLength = publicInputs is null ? 0 : publicInputs.Length;
 
         ExecutionEngine.Assert(
@@ -492,15 +495,20 @@ public class zNEP17Protocol : SmartContract
                 asset.IsValidAndNotZero,
                 recipient.IsValidAndNotZero,
                 relayer.IsValidAndNotZero,
-                amount,
+                amountWithdraw,
                 fee,
                 rootLength,
                 nullifierLength,
+                newCommitmentLength,
                 proofLength,
                 publicInputsLength),
             "invalid withdraw arguments");
         ExecutionEngine.Assert(
-            proof is not null && publicInputs is not null && merkleRoot is not null && nullifierHash is not null,
+            proof is not null
+            && publicInputs is not null
+            && merkleRoot is not null
+            && nullifierHash is not null
+           ,
             "proof/public inputs cannot be null");
 
         if (fee > 0)
@@ -519,16 +527,23 @@ public class zNEP17Protocol : SmartContract
         ExecutionEngine.Assert(IsKnownRoot(merkleRoot!), "unknown merkle root");
         ExecutionEngine.Assert(!IsNullifierUsed(nullifierHash!), "nullifier already used");
         ExecutionEngine.Assert(
-            VerifyProof(asset, proof!, publicInputs!, merkleRoot!, nullifierHash!, recipient, relayer, amount, fee),
+            VerifyProof(asset, proof!, publicInputs!, merkleRoot!, nullifierHash!, newCommitment!, recipient, relayer, amountWithdraw, fee),
             "zk proof invalid");
 
-        BigInteger payout = PrivacyGuards.CalculateRecipientPayout(amount, fee);
+        BigInteger payout = PrivacyGuards.CalculateRecipientPayout(amountWithdraw, fee);
         NullifierMap().Put(nullifierHash!, true);
+        
+        // UTXO: Append the new commitment to the Merkle tree like a deposit
+        BigInteger index = NextLeafIndex();
+        LeafMap().Put(index.ToByteArray(), newCommitment!);
+        
         TransferOut(asset, recipient, payout);
         if (fee > 0)
             TransferOut(asset, relayer, fee);
 
-        OnPrivacyWithdraw(asset, recipient, amount, nullifierHash!);
+        OnPrivacyWithdraw(asset, recipient, amountWithdraw, nullifierHash!);
+        // Emit deposit event for the change so the maintainer can index it
+        OnPrivacyDeposit(asset, UInt160.Zero, 0, newCommitment!, index);
     }
 
     [DisplayName("onNEP17Payment")]
@@ -560,7 +575,9 @@ public class zNEP17Protocol : SmartContract
         SetAssetBalance(asset, current + amount);
 
         BigInteger index = NextLeafIndex();
+        ExecutionEngine.Assert(CommitmentIndexMap().Get(leaf!) is null, "commitment already deposited");
         LeafMap().Put(index.ToByteArray(), leaf!);
+        CommitmentIndexMap().Put(leaf!, index);
         OnPrivacyDeposit(asset, stealthAddress, amount, leaf!, index);
     }
 
@@ -610,9 +627,10 @@ public class zNEP17Protocol : SmartContract
         byte[] publicInputs,
         byte[] merkleRoot,
         byte[] nullifierHash,
+        byte[] newCommitment,
         UInt160 recipient,
         UInt160 relayer,
-        BigInteger amount,
+        BigInteger amountWithdraw,
         BigInteger fee)
     {
         UInt160 verifier = GetVerifier();
@@ -628,9 +646,10 @@ public class zNEP17Protocol : SmartContract
             publicInputs,
             merkleRoot,
             nullifierHash,
+            newCommitment,
             recipient,
             relayer,
-            amount,
+            amountWithdraw,
             fee);
 
         return result is bool ok && ok;
@@ -677,7 +696,9 @@ public class zNEP17Protocol : SmartContract
     private static StorageMap RootHistoryMap() => new(Storage.CurrentContext, PrefixRootHistory);
     private static StorageMap NullifierMap() => new(Storage.CurrentContext, PrefixNullifiers);
     private static StorageMap LeafMap() => new(Storage.CurrentContext, PrefixLeaves);
+    private static StorageMap CommitmentIndexMap() => new(Storage.CurrentContext, PrefixCommitmentIndices);
+    private static StorageMap CommitmentSpentMap() => new(Storage.CurrentContext, PrefixSpentCommitments);
     private static StorageMap AssetBalanceMap() => new(Storage.CurrentContext, PrefixAssetBalances);
     private static StorageMap AllowedAssetMap() => new(Storage.CurrentContext, PrefixAllowedAssets);
     private static StorageMap RootLeafCountMap() => new(Storage.CurrentContext, PrefixRootLeafCounts);
-    }
+}

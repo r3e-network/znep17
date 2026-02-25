@@ -1,7 +1,7 @@
 {
   "/_not-found/page": "app/_not-found/page.js",
-  "/api/maintainer/route": "app/api/maintainer/route.js",
   "/_global-error/page": "app/_global-error/page.js",
   "/page": "app/page.js",
+  "/api/maintainer/route": "app/api/maintainer/route.js",
   "/api/relay/route": "app/api/relay/route.js"
 }

@@ -18,7 +18,7 @@ function encodeLe32(value: bigint): Buffer {
 }
 
 describe("relay encoding helpers", () => {
-  it("packs public inputs as 7 x 32-byte little-endian payload", async () => {
+  it("packs public inputs as 8 x 32-byte little-endian payload", async () => {
     const signals = [
       "1",
       "256",
@@ -27,12 +27,13 @@ describe("relay encoding helpers", () => {
       "42",
       "100000000",
       "340282366920938463463374607431768211455",
+      "999999999999999999",
     ];
 
     const payloadB64 = encodePublicInputsPayload(signals);
     const payload = Buffer.from(payloadB64, "base64");
 
-    expect(payload.length).toBe(224);
+    expect(payload.length).toBe(256);
     for (let i = 0; i < signals.length; i++) {
       const expected = encodeLe32(BigInt(signals[i]));
       const got = payload.subarray(i * 32, (i + 1) * 32);

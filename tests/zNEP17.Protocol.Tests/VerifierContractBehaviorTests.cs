@@ -13,7 +13,27 @@ namespace zNEP17.Protocol.Tests;
 public class VerifierContractBehaviorTests
 {
     [Fact]
-    public void Verify_Accepts_KnownValidFixture() { }
+    public void Fixture_PublicInputs_Match_VerifierBindingOrder()
+    {
+        ValidWithdrawFixture fixture = LoadValidFixture();
+        byte[] publicInputs = Convert.FromHexString(fixture.PublicInputsHex);
+        Assert.Equal(256, publicInputs.Length);
+
+        UInt160 asset = UInt160.Parse(fixture.Asset);
+        UInt160 recipient = UInt160.Parse(fixture.Recipient);
+        UInt160 relayer = UInt160.Parse(fixture.Relayer);
+        BigInteger amount = BigInteger.Parse(fixture.Amount);
+        BigInteger fee = BigInteger.Parse(fixture.Fee);
+
+        AssertSlice(publicInputs, 0 * 32, Reverse32(Convert.FromHexString(fixture.MerkleRoot)));
+        AssertSlice(publicInputs, 1 * 32, Reverse32(Convert.FromHexString(fixture.NullifierHash)));
+        AssertSlice(publicInputs, 2 * 32, EncodeUInt160Scalar(recipient));
+        AssertSlice(publicInputs, 3 * 32, EncodeUInt160Scalar(relayer));
+        AssertSlice(publicInputs, 4 * 32, EncodeBigIntegerScalar(amount));
+        AssertSlice(publicInputs, 5 * 32, EncodeBigIntegerScalar(fee));
+        AssertSlice(publicInputs, 6 * 32, EncodeUInt160Scalar(asset));
+        AssertSlice(publicInputs, 7 * 32, Reverse32(Convert.FromHexString(fixture.Commitment)));
+    }
 
     [Fact]
     public void Verify_Rejects_InvalidProofLength()
@@ -34,6 +54,7 @@ public class VerifierContractBehaviorTests
             new byte[256],
             NewFixedBytes(0x11),
             NewFixedBytes(0x12),
+            NewFixedBytes(0x13),
             recipient,
             relayer,
             10,
@@ -61,6 +82,7 @@ public class VerifierContractBehaviorTests
             new byte[255], // expected 256
             NewFixedBytes(0x21),
             NewFixedBytes(0x22),
+            NewFixedBytes(0x23),
             recipient,
             relayer,
             10,
@@ -94,6 +116,7 @@ public class VerifierContractBehaviorTests
             publicInputs,
             root,
             nullifier,
+            commitment,
             recipient,
             relayer,
             10,

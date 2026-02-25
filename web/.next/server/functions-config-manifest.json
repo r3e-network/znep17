@@ -1,6 +1,9 @@
 {
   "version": 1,
   "functions": {
+    "/api/maintainer": {
+      "maxDuration": 60
+    },
     "/api/relay": {
       "maxDuration": 60
     }

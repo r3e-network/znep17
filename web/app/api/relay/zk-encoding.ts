@@ -2,14 +2,14 @@ import { getCurveFromName } from "ffjavascript";
 import type { Groth16Proof, PublicSignals } from "snarkjs";
 
 const SCALAR_BYTES = 32;
-const PUBLIC_INPUT_COUNT = 7;
+const PUBLIC_INPUT_COUNT = 8;
 const HASH160_HEX_RE = /^(?:0x)?[0-9a-fA-F]{40}$/;
 const COMPRESSED_FLAG = 0x80;
 const INFINITY_FLAG = 0x40;
 const SIGN_FLAG = 0x20;
 
 export const GROTH16_PROOF_PACKED_BYTES = 192;
-export const GROTH16_PUBLIC_INPUTS_PACKED_BYTES = 224;
+export const GROTH16_PUBLIC_INPUTS_PACKED_BYTES = 256;
 
 type BlsGroup = {
   fromObject(point: unknown): unknown;

@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 "use strict";
-/* eslint-disable @typescript-eslint/no-require-imports */
-
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
 const EXPECTED_SHA256 = {
-  "public/zk/withdraw.wasm": "b8fa0c97194e5c788cd597bd3a017ae523787ed65251132590e07dad51d95895",
-  "public/zk/withdraw_final.zkey": "40c619dff284d9a773b4108ebe1dd3b556bcf2a8c8523349d11545e8cb90751c",
-  "public/zk/verification_key.json": "62b4ee39c0e77406a8b3a4ec217656c7666fe1957c4a4b0e09bab69d8c60b714",
+  "public/zk/withdraw.wasm": "72ce3e5ea2fbc36aa5c7aaee6086d2a42089a0c04f4f9c937fe610f2e9036861",
+  "public/zk/withdraw_final.zkey": "b1f8e32f035314fb2c6e3d34f3243c4828d76ab95ac3aaa66817e5abe17ab6b2",
+  "public/zk/verification_key.json": "57f6b84ef71c6bf76a09894ed1601d4823b9971ad742d3be9a4629e09afbd130",
 };
 
 function sha256File(filePath) {
