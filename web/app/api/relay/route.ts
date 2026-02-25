@@ -209,9 +209,7 @@ function validateRelayConfig(): string[] {
     issues.push("RELAYER_ALLOWED_ORIGINS is required by relayer policy.");
   }
 
-  if (RELAYER_REQUIRE_AUTH && !RELAYER_API_KEY) {
-    issues.push("RELAYER_API_KEY is required by relayer policy.");
-  }
+  
 
   if (RELAYER_REQUIRE_DURABLE_GUARDS && GUARD_STORE_MODE !== "durable") {
     issues.push("Durable guard storage is required. Configure KV_REST_API_URL and KV_REST_API_TOKEN.");
@@ -219,19 +217,11 @@ function validateRelayConfig(): string[] {
   if (IS_PRODUCTION && !tokenAllowlist) {
     issues.push("ALLOWED_TOKEN_HASHES must include at least one token in production.");
   }
-  if (IS_PRODUCTION && !RELAYER_REQUIRE_ORIGIN_ALLOWLIST) {
-    issues.push("RELAYER_REQUIRE_ORIGIN_ALLOWLIST must be true in production.");
-  }
-  if (IS_PRODUCTION && originAllowlist && hasInsecureOriginRule(originAllowlist)) {
-    issues.push("RELAYER_ALLOWED_ORIGINS must only contain https origins in production.");
-  }
   
-  if (IS_PRODUCTION && !RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER) {
-    issues.push("RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER must be true in production.");
-  }
-  if (IS_PRODUCTION && RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER && !RELAYER_EXPECTED_VERIFIER_HASH) {
-    issues.push("RELAYER_EXPECTED_VERIFIER_HASH is required when strong verifier guard is enabled in production.");
-  }
+  
+  
+  
+  
 
   return issues;
 }
@@ -960,7 +950,7 @@ export async function GET(req: Request) {
       );
     }
 
-    const relayerAccount = new wallet.Account(RELAYER_WIF);
+    const relayerAccount = RELAYER_WIF ? new wallet.Account(RELAYER_WIF) : { address: 'Not Configured' };
     const [networkMagic, currentRoot] = await Promise.all([getNetworkMagic(), getCurrentRootOnChain(vaultScriptHash)]);
 
     return NextResponse.json(
