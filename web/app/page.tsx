@@ -249,8 +249,7 @@ async function fetchMerkleProofFromRelay(commitmentHex: string): Promise<MerkleP
 
 export default function Home() {
   const [account, setAccount] = useState<NeoLineAccount | null>(null);
-  const [activeTab, setActiveTab] = useState<"deposit" | "withdraw">("deposit");
-  const [amount, setAmount] = useState("10");
+    const [amount, setAmount] = useState("10");
   const [tokenHash, setTokenHash] = useState(TOKEN_DEFAULT);
   const [vaultHash, setVaultHash] = useState("");
   const [relayVaultHash, setRelayVaultHash] = useState("");
@@ -774,55 +773,51 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-gray-700 bg-gray-800 shadow-2xl">
-        <div className="flex border-b border-gray-700">
-          <button
-            className={`flex-1 py-4 text-center font-medium transition-colors ${
-              activeTab === "deposit" ? "bg-gray-700 text-green-400" : "text-gray-400 hover:bg-gray-700"
-            }`}
-            onClick={() => setActiveTab("deposit")}
-          >
-            Deposit
-          </button>
-          <button
-            className={`flex-1 py-4 text-center font-medium transition-colors ${
-              activeTab === "withdraw" ? "bg-gray-700 text-blue-400" : "text-gray-400 hover:bg-gray-700"
-            }`}
-            onClick={() => setActiveTab("withdraw")}
-          >
-            Withdraw
-          </button>
-        </div>
-
-        <div className="space-y-4 p-6">
-          <div className="flex flex-col md:flex-row gap-4 mb-6">
-            <div className="flex-1">
-              <label className="block text-sm font-medium text-gray-400 mb-2">Select Asset</label>
-              <div className="flex gap-4">
-                <button
-                  onClick={() => setTokenHash("0xd2a4cff31913016155e38e474a2c06d08be276cf")}
-                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all ${tokenHash === "0xd2a4cff31913016155e38e474a2c06d08be276cf" ? "border-green-500 bg-green-500/10 text-green-400" : "border-gray-700 hover:border-gray-600 bg-gray-800 text-gray-400"}`}
-                >
-                  <div className="w-6 h-6 rounded-full bg-green-500/20 flex items-center justify-center font-bold text-green-400 text-xs">G</div>
-                  <span className="font-semibold tracking-wide">GAS</span>
-                </button>
-                <button
-                  onClick={() => setTokenHash("0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5")}
-                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all ${tokenHash === "0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5" ? "border-green-500 bg-green-500/10 text-green-400" : "border-gray-700 hover:border-gray-600 bg-gray-800 text-gray-400"}`}
-                >
-                  <div className="w-6 h-6 rounded-full bg-green-500/20 flex items-center justify-center font-bold text-green-400 text-xs">N</div>
-                  <span className="font-semibold tracking-wide">NEO</span>
-                </button>
-              </div>
-            </div>
-            <div className="w-full md:w-1/3">
-              <label className="block text-sm font-medium text-gray-400 mb-2">Amount</label>
-              <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full rounded-xl border-2 border-gray-700 bg-gray-900 px-4 py-3 text-white font-mono text-lg h-[52px] focus:border-green-500 focus:outline-none transition-colors" placeholder="0.0" />
+      
+      {/* Asset and Amount Selection */}
+      <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-2xl mb-8">
+        <div className="flex flex-col md:flex-row gap-4 mb-2">
+          <div className="flex-1">
+            <label className="block text-sm font-medium text-gray-400 mb-2">Select Asset</label>
+            <div className="flex gap-4">
+              <button
+                onClick={() => setTokenHash("0xd2a4cff31913016155e38e474a2c06d08be276cf")}
+                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all ${tokenHash === "0xd2a4cff31913016155e38e474a2c06d08be276cf" ? "border-green-500 bg-green-500/10 text-green-400" : "border-gray-700 hover:border-gray-600 bg-gray-800 text-gray-400"}`}
+              >
+                <svg width="24" height="24" viewBox="0 0 220 220" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-green-500">
+  <path d="M109.846 0C49.1846 0 0 49.1846 0 109.846C0 170.508 49.1846 220 109.846 220C170.508 220 220 170.508 220 109.846C220 49.1846 170.508 0 109.846 0ZM109.846 205.538C57.0615 205.538 14.4615 162.938 14.4615 110.154C14.4615 57.3692 57.0615 14.7692 109.846 14.7692C162.631 14.7692 205.231 57.3692 205.231 110.154C205.231 162.938 162.631 205.538 109.846 205.538Z" fill="currentColor"/>
+  <path d="M165.846 80.6769L115.8 45.4154L55.7538 135.046L105.8 170.308L165.846 80.6769ZM64.6769 133.569L117.277 55.0769L156.923 83.0462L104.323 161.538L64.6769 133.569Z" fill="currentColor"/>
+  <path d="M110.154 52.8L121.154 60.1846L86.5846 111.877L75.5846 104.492L110.154 52.8Z" fill="currentColor"/>
+  <path d="M136.246 70.2154L147.246 77.6L112.677 129.292L101.677 121.908L136.246 70.2154Z" fill="currentColor"/>
+</svg>
+                <span className="font-semibold tracking-wide">GAS</span>
+              </button>
+              <button
+                onClick={() => setTokenHash("0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5")}
+                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all ${tokenHash === "0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5" ? "border-green-500 bg-green-500/10 text-green-400" : "border-gray-700 hover:border-gray-600 bg-gray-800 text-gray-400"}`}
+              >
+                <svg width="24" height="24" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-green-500">
+  <path d="M127.9 0L18.5 56.9L0 220.1L127.9 256L256 220.1L237.5 56.9L127.9 0ZM185 102.6V209.5L124.7 172.9L71.5 103V209.5L36.6 199.9V90.5L96.9 127L150.5 197V90.5L185 102.6Z" fill="currentColor"/>
+</svg>
+                <span className="font-semibold tracking-wide">NEO</span>
+              </button>
             </div>
           </div>
+          <div className="w-full md:w-1/3">
+            <label className="block text-sm font-medium text-gray-400 mb-2">Amount</label>
+            <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full rounded-xl border-2 border-gray-700 bg-gray-900 px-4 py-3 text-white font-mono text-lg h-[52px] focus:border-green-500 focus:outline-none transition-colors" placeholder="0.0" />
+          </div>
+        </div>
+      </div>
 
-          {activeTab === "deposit" ? (
-            <>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        
+          {/* Deposit Card */}
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-2xl flex flex-col h-full">
+            <h2 className="text-xl font-bold text-green-400 mb-6 flex items-center gap-2">
+              <ArrowRight className="h-5 w-5" /> Deposit
+            </h2>
+            <div className="flex-grow space-y-4">
               <div className="mb-4">
                 <input
                   type="text"
@@ -870,18 +865,25 @@ export default function Home() {
                   </div>
                 </div>
               )}
+            </div>
+            
+            <button
+              onClick={handleDeposit}
+              disabled={loading || !account || !secretHex}
+              className="mt-6 flex w-full items-center justify-center space-x-2 rounded-lg bg-green-600 py-4 font-bold text-white transition-colors hover:bg-green-500 focus:ring-4 focus:ring-green-500/50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loading ? <Activity className="h-5 w-5 animate-spin" /> : <ArrowRight className="h-5 w-5" />}
+              <span>{account ? (secretHex ? "Deposit Anonymously" : "Generate Ticket First") : "Connect Wallet to Deposit"}</span>
+            </button>
+          </div>
 
-              <button
-                onClick={handleDeposit}
-                disabled={loading || !account || !secretHex}
-                className="mt-2 flex w-full items-center justify-center space-x-2 rounded-lg bg-green-600 py-4 font-bold text-white transition-colors hover:bg-green-500 focus:ring-4 focus:ring-green-500/50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {loading ? <Activity className="h-5 w-5 animate-spin" /> : <ArrowRight className="h-5 w-5" />}
-                <span>{account ? (secretHex ? "Deposit Anonymously" : "Generate Ticket First") : "Connect Wallet to Deposit"}</span>
-              </button>
-            </>
-          ) : (
-            <>
+        
+          {/* Withdraw Card */}
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-2xl flex flex-col h-full mt-4 lg:mt-0">
+            <h2 className="text-xl font-bold text-blue-400 mb-6 flex items-center gap-2">
+              <Shield className="h-5 w-5" /> Withdraw
+            </h2>
+            <div className="flex-grow space-y-4">
               <div className="mb-4">
                 <label className="mb-1 block text-sm font-medium text-gray-400">Final Recipient Address</label>
                 <input
@@ -895,25 +897,81 @@ export default function Home() {
               
               {(!secretHex || !nullifierPrivHex) && (
                  <div className="mb-4 rounded border border-yellow-800/50 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-400">
-                    <strong>No auto-saved ticket found.</strong> Please open Advanced Settings to enter your Secret and Nullifier manually.
+                    <strong>No auto-saved ticket found.</strong> Please open Advanced Settings to enter your Privacy Ticket manually.
                  </div>
               )}
+            </div>
 
+            <div className="mt-auto">
               <button
                 onClick={handleWithdraw}
                 disabled={loading || relayLoading || !relayer || !secretHex}
-                className="mt-4 flex w-full items-center justify-center space-x-2 rounded-lg bg-blue-600 py-4 font-bold text-white transition-colors hover:bg-blue-500 focus:ring-4 focus:ring-blue-500/50 disabled:cursor-not-allowed disabled:opacity-50"
+                className="mt-6 flex w-full items-center justify-center space-x-2 rounded-lg bg-blue-600 py-4 font-bold text-white transition-colors hover:bg-blue-500 focus:ring-4 focus:ring-blue-500/50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {loading ? <Activity className="h-5 w-5 animate-spin" /> : <Shield className="h-5 w-5" />}
                 <span>{relayLoading ? "Loading Relayer..." : "Process Withdraw"}</span>
               </button>
               {zkStatus && <p className="mt-2 animate-pulse text-center text-sm text-blue-400">{zkStatus}</p>}
-            </>
-          )}
-        </div>
+            </div>
+          </div>
+
       </div>
 
+      
+        {/* Advanced Settings Accordion */}
+        <div className="mt-8 border-t border-gray-800 pt-4">
+          <button 
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="flex items-center text-sm font-medium text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            {showAdvanced ? "Hide Advanced Settings" : "Show Advanced Settings"}
+          </button>
+          
+          {showAdvanced && (
+            <div className="mt-4 space-y-4 rounded-lg bg-gray-900/50 p-4 border border-gray-800">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-500">Vault Contract Hash</label>
+                  <input
+                    type="text"
+                    value={vaultHash}
+                    onChange={(e) => {
+                      if (ALLOW_CUSTOM_VAULT_HASH) setVaultHash(e.target.value);
+                    }}
+                    readOnly={!ALLOW_CUSTOM_VAULT_HASH}
+                    className={`w-full rounded-lg border border-gray-700 px-3 py-2 text-sm text-white ${
+                      ALLOW_CUSTOM_VAULT_HASH ? "bg-gray-800" : "cursor-not-allowed bg-gray-800/60 text-gray-400"
+                    }`}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-gray-500">Relayer Address</label>
+                  <input
+                    type="text"
+                    value={relayer}
+                    readOnly
+                    className="w-full cursor-not-allowed rounded-lg border border-gray-700 bg-gray-800/60 px-3 py-2 text-sm text-gray-400"
+                  />
+                </div>
+              </div>
 
-      </main>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="md:col-span-2">
+                  <label className="mb-1 block text-sm font-medium text-gray-500">Manual Privacy Ticket</label>
+                  <input
+                    type="password"
+                    value={getTicketString()}
+                    onChange={(e) => handleTicketInput(e.target.value)}
+                    className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 font-mono text-sm text-white focus:border-blue-500 focus:outline-none transition-colors"
+                    placeholder="Paste your znep17-... ticket here"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+
+    </main>
   );
 }
