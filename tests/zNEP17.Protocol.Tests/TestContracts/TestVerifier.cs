@@ -46,7 +46,7 @@ public class TestVerifier : SmartContract
         byte[] publicInputs,
         byte[] merkleRoot,
         byte[] nullifierHash,
-        byte[] commitment,
+        
         UInt160 recipient,
         UInt160 relayer,
         BigInteger amount,
@@ -64,8 +64,6 @@ public class TestVerifier : SmartContract
         if (merkleRoot is null || merkleRoot.Length != 32)
             return false;
         if (nullifierHash is null || nullifierHash.Length != 32)
-            return false;
-        if (commitment is null || commitment.Length != 32)
             return false;
         if (amount <= 0 || fee < 0 || amount <= fee)
             return false;

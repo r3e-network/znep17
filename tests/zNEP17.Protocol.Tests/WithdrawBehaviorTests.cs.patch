@@ -1,0 +1,66 @@
+--- tests/zNEP17.Protocol.Tests/WithdrawBehaviorTests.cs
++++ tests/zNEP17.Protocol.Tests/WithdrawBehaviorTests.cs
+@@ -47,7 +47,6 @@
+             fee: 1,
+             rootLength: PrivacyGuards.MerkleRootLength,
+             nullifierLength: PrivacyGuards.NullifierLength,
+-            commitmentLength: PrivacyGuards.LeafLength,
+             proofLength: PrivacyGuards.Groth16ProofLength,
+             publicInputsLength: PrivacyGuards.Groth16PublicInputsLength);
+ 
+@@ -181,7 +180,6 @@
+     {
+         bool valid = PrivacyGuards.IsValidEmergencyWithdrawRequest(
+             isAssetValid: false,
+             isRecipientValid: true,
+             amount: 10,
+-            commitmentLength: PrivacyGuards.LeafLength);
+ 
+         Assert.False(valid);
+     }
+@@ -193,7 +191,6 @@
+     {
+         bool valid = PrivacyGuards.IsValidEmergencyWithdrawRequest(
+             isAssetValid: true,
+             isRecipientValid: false,
+             amount: 10,
+-            commitmentLength: PrivacyGuards.LeafLength);
+ 
+         Assert.False(valid);
+     }
+@@ -205,13 +202,11 @@
+     {
+         bool zero = PrivacyGuards.IsValidEmergencyWithdrawRequest(
+             isAssetValid: true,
+             isRecipientValid: true,
+             amount: 0,
+-            commitmentLength: PrivacyGuards.LeafLength);
+ 
+         bool negative = PrivacyGuards.IsValidEmergencyWithdrawRequest(
+             isAssetValid: true,
+             isRecipientValid: true,
+             amount: -1,
+-            commitmentLength: PrivacyGuards.LeafLength);
+ 
+         Assert.False(zero);
+         Assert.False(negative);
+@@ -221,7 +216,6 @@
+     {
+         bool valid = PrivacyGuards.IsValidEmergencyWithdrawRequest(
+             isAssetValid: true,
+             isRecipientValid: true,
+             amount: 10,
+-            commitmentLength: 16);
+ 
+         Assert.False(valid);
+     }
+@@ -231,7 +225,6 @@
+     {
+         bool valid = PrivacyGuards.IsValidEmergencyWithdrawRequest(
+             isAssetValid: true,
+             isRecipientValid: true,
+             amount: 10,
+-            commitmentLength: PrivacyGuards.LeafLength);
+ 
+         Assert.True(valid);
+     }

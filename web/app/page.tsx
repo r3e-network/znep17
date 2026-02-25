@@ -857,6 +857,28 @@ export default function Home() {
           )}
         </div>
       </div>
-    </main>
+    
+        <div className="bg-white/5 border border-white/10 rounded-xl p-8 shadow-2xl mt-8">
+          <h2 className="text-xl font-semibold mb-4">Tree Maintainer Tools</h2>
+          <p className="text-sm text-white/70 mb-4">
+            Manually trigger an update of the on-chain Merkle root. Only required if the background cron job is disabled.
+          </p>
+          <button
+            onClick={async () => {
+              try {
+                const res = await fetch("/api/maintainer", { method: "POST" });
+                const data = await res.json();
+                alert(JSON.stringify(data, null, 2));
+              } catch(e) {
+                alert("Error: " + e);
+              }
+            }}
+            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 rounded-lg transition-colors focus:ring-4 focus:ring-blue-500/50 outline-none"
+          >
+            Update Merkle Root
+          </button>
+        </div>
+
+      </main>
   );
 }
