@@ -733,20 +733,29 @@ export default function Home() {
         </div>
 
         <div className="space-y-4 p-6">
-          <div className="flex flex-col md:flex-row gap-4 mb-4">
+          <div className="flex flex-col md:flex-row gap-4 mb-6">
             <div className="flex-1">
-              <div className="flex justify-between items-center mb-1">
-                <label className="block text-sm font-medium text-gray-400">Token Script Hash (Asset)</label>
-                <div className="space-x-2 text-xs">
-                  <button onClick={() => setTokenHash("0xd2a4cff31913016155e38e474a2c06d08be276cf")} className="text-gray-500 hover:text-green-400 transition-colors">GAS</button>
-                  <button onClick={() => setTokenHash("0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5")} className="text-gray-500 hover:text-green-400 transition-colors">NEO</button>
-                </div>
+              <label className="block text-sm font-medium text-gray-400 mb-2">Select Asset</label>
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setTokenHash("0xd2a4cff31913016155e38e474a2c06d08be276cf")}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all ${tokenHash === "0xd2a4cff31913016155e38e474a2c06d08be276cf" ? "border-green-500 bg-green-500/10 text-green-400" : "border-gray-700 hover:border-gray-600 bg-gray-800 text-gray-400"}`}
+                >
+                  <div className="w-6 h-6 rounded-full bg-green-500/20 flex items-center justify-center font-bold text-green-400 text-xs">G</div>
+                  <span className="font-semibold tracking-wide">GAS</span>
+                </button>
+                <button
+                  onClick={() => setTokenHash("0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5")}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all ${tokenHash === "0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5" ? "border-green-500 bg-green-500/10 text-green-400" : "border-gray-700 hover:border-gray-600 bg-gray-800 text-gray-400"}`}
+                >
+                  <div className="w-6 h-6 rounded-full bg-green-500/20 flex items-center justify-center font-bold text-green-400 text-xs">N</div>
+                  <span className="font-semibold tracking-wide">NEO</span>
+                </button>
               </div>
-              <input type="text" value={tokenHash} onChange={(e) => setTokenHash(e.target.value)} className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-white font-mono text-sm" placeholder="0x..." />
             </div>
             <div className="w-full md:w-1/3">
-              <label className="mb-1 block text-sm font-medium text-gray-400">Amount</label>
-              <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-white font-mono text-sm" placeholder="0.0" />
+              <label className="block text-sm font-medium text-gray-400 mb-2">Amount</label>
+              <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full rounded-xl border-2 border-gray-700 bg-gray-900 px-4 py-3 text-white font-mono text-lg h-[52px] focus:border-green-500 focus:outline-none transition-colors" placeholder="0.0" />
             </div>
           </div>
 
@@ -836,39 +845,6 @@ export default function Home() {
               {zkStatus && <p className="mt-2 animate-pulse text-center text-sm text-blue-400">{zkStatus}</p>}
             </>
           )}
-        </div>
-      </div>
-    
-        
-      <div className="mt-8 overflow-hidden rounded-xl border border-gray-700 bg-gray-800 shadow-2xl">
-        <div className="border-b border-gray-700 p-4">
-          <h2 className="flex items-center space-x-2 font-semibold text-gray-200">
-            <Activity className="h-5 w-5 text-purple-400" />
-            <span>Tree Maintainer Tools</span>
-          </h2>
-        </div>
-        <div className="p-6">
-          <p className="mb-4 text-sm text-gray-400">
-            Manually trigger an update of the on-chain Merkle root. Use this to sync deposits before withdrawal if the background cron job is disabled.
-          </p>
-          <button
-            onClick={async () => {
-              try {
-                const res = await fetch("/api/maintainer", { method: "POST" });
-                const data = await res.json();
-                if (data.success) {
-                   alert("Success! Txid: " + data.txid + "\nNew Root: " + data.newRoot.slice(0, 10) + "...");
-                } else {
-                   alert(data.message || data.error || "Unknown error");
-                }
-              } catch(e) {
-                alert("Error: " + e);
-              }
-            }}
-            className="flex w-full items-center justify-center space-x-2 rounded-lg bg-purple-600 py-3 font-medium text-white transition-colors hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
-          >
-            <span>Update Merkle Root</span>
-          </button>
         </div>
       </div>
 
