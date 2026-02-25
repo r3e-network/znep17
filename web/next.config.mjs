@@ -6,6 +6,9 @@ const __dirname = path.dirname(__filename)
 
 const nextConfig = {
   outputFileTracingRoot: __dirname,
+  // This project uses a patched vendored `elliptic` package outside `web/`.
+  // Trace from the repo root so Vercel includes required files for server routes.
+  
   webpack: (config) => {
     config.resolve.fallback = { fs: false, encoding: false, buffer: false }
 
