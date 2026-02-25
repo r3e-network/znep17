@@ -3,6 +3,10 @@ import { wallet, rpc, tx, u, sc } from "@cityofzion/neon-js";
 import { poseidon2Bls } from "../../lib/blsPoseidon";
 import { supabase } from "../../lib/supabase";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
 export async function POST() {
   try {
     const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || "https://testnet1.neo.coz.io:443";
