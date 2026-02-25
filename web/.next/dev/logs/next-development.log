@@ -1,0 +1,8 @@
+[00:00:02.946] Server  LOG     ✓ Ready in 2.7s
+[00:05:19.455] Server  LOG     ○ Compiling / ...
+[00:05:23.825] Server  WARN    ⚠ Cross origin request detected from 127.0.0.1 to /_next/* resource. In a future major version of Next.js, you will need to explicitly configure "allowedDevOrigins" in next.config to allow this.
+Read more: https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins
+[00:05:24.182] Browser INFO    %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[00:07:05.951] Server  ERROR   (node:3925931) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[00:07:06.893] Server  ERROR   Relay Error: "Failed to get system fee. Error: Script execution failed. ExecutionEngine state = FAULT. ABORTMSG is executed. Reason: insufficient vault balance"

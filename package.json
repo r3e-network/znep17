@@ -1,0 +1,30 @@
+{
+  "name": "znep17",
+  "version": "1.0.0",
+  "description": "Production-grade zNEP-17 privacy vault stack for Neo N3 with contract, relayer, frontend, and testnet verification flows.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Use dotnet test for C# suites\"",
+    "test:security": "node scripts/security-elliptic-truncation-regression.cjs",
+    "testnet:e2e": "node scripts/run-testnet-e2e.cjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@cityofzion/neon-js": "^5.8.1",
+    "ffjavascript": "^0.3.1",
+    "poseidon-lite": "^0.3.0",
+    "snarkjs": "^0.7.6"
+  },
+  "overrides": {
+    "bfj": "9.1.3",
+    "bn.js": "5.2.3",
+    "elliptic": "file:vendor/elliptic"
+  }
+}
