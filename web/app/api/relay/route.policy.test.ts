@@ -46,7 +46,7 @@ function buildValidPostBody(overrides?: Partial<Record<string, unknown>>): Recor
       ],
       pi_c: ["5", "6", "1"],
     },
-    publicInputs: ["0", "0", "0", "0", "0", "0", "0", "0"],
+    publicInputs: ["0", "0", "0", "0", "0", "0", "0"],
     merkleRoot: `0x${"11".repeat(32)}`,
     nullifierHash: `0x${"12".repeat(32)}`,
     commitment: `0x${"13".repeat(32)}`,

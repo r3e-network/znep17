@@ -1,5 +1,6 @@
 {
   "/_not-found/page": "/_not-found",
+  "/api/maintainer/route": "/api/maintainer",
   "/_global-error/page": "/_global-error",
   "/page": "/",
   "/api/relay/route": "/api/relay"

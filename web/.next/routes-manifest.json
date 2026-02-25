@@ -76,6 +76,12 @@
       "namedRegex": "^/_not\\-found(?:/)?$"
     },
     {
+      "page": "/api/maintainer",
+      "regex": "^/api/maintainer(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/api/maintainer(?:/)?$"
+    },
+    {
       "page": "/api/relay",
       "regex": "^/api/relay(?:/)?$",
       "routeKeys": {},
