@@ -225,9 +225,7 @@ function validateRelayConfig(): string[] {
   if (IS_PRODUCTION && originAllowlist && hasInsecureOriginRule(originAllowlist)) {
     issues.push("RELAYER_ALLOWED_ORIGINS must only contain https origins in production.");
   }
-  if (IS_PRODUCTION && !RELAYER_REQUIRE_DURABLE_GUARDS) {
-    issues.push("RELAYER_REQUIRE_DURABLE_GUARDS must be true in production.");
-  }
+  
   if (IS_PRODUCTION && !RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER) {
     issues.push("RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER must be true in production.");
   }
