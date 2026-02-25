@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Wallet, ArrowRight, Shield, Activity, X, RefreshCw, Copy, Check } from "lucide-react";
+import { Wallet, ArrowRight, Shield, Activity, X, RefreshCw, Copy, Check, Info, FileText } from "lucide-react";
 import { wallet } from "@cityofzion/neon-js";
 import { poseidon1Bls, poseidon4Bls } from "./lib/blsPoseidon";
 
@@ -711,6 +711,48 @@ export default function Home() {
           </a>
         </div>
       )}
+
+      {/* Documentation Section */}
+      <div className="mb-8 rounded-xl border border-blue-900/50 bg-blue-950/20 p-6 shadow-xl relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-2 h-full bg-blue-500"></div>
+        <div className="flex items-start gap-4">
+          <div className="mt-1 bg-blue-500/20 p-2 rounded-full text-blue-400">
+            <FileText className="h-6 w-6" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-gray-100 mb-2">How zNEP-17 Works</h2>
+            <p className="text-sm text-gray-400 mb-4 leading-relaxed">
+              zNEP-17 is a Zero-Knowledge privacy vault for the Neo N3 blockchain. It breaks the on-chain link between the sender and the receiver, allowing you to transfer assets anonymously.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-gray-300">
+              <div>
+                <h3 className="font-semibold text-blue-300 mb-1 flex items-center gap-2"><span className="bg-blue-900 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs">1</span> Deposit</h3>
+                <p className="leading-relaxed">When you deposit, a random <strong>Secret</strong> and <strong>Nullifier</strong> are generated. These are mathematically hashed into a &quot;Leaf&quot; and inserted into the vault&apos;s on-chain Merkle tree. Your wallet is disconnected from this secret ticket.</p>
+              </div>
+              <div>
+                <h3 className="font-semibold text-green-300 mb-1 flex items-center gap-2"><span className="bg-green-900 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs">2</span> Withdraw</h3>
+                <p className="leading-relaxed">To withdraw, your browser generates a <strong>zk-SNARK proof</strong> using your Secret and Nullifier. This proves you own a deposit in the vault without revealing <i>which</i> deposit it is. The funds are sent to a new, completely clean address.</p>
+              </div>
+            </div>
+            
+            <div className="mt-6 pt-4 border-t border-blue-900/30 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+              <div className="text-xs text-gray-400">
+                <span className="block mb-1"><strong className="text-gray-300">Vault Contract:</strong> <code className="bg-gray-900 px-1 py-0.5 rounded ml-1 select-all">{vaultHash || process.env.NEXT_PUBLIC_VAULT_HASH || "Loading..."}</code></span>
+                <span className="block"><strong className="text-gray-300">Network:</strong> {networkMagic === 860833102 ? "Mainnet" : "Testnet"} ({networkMagic})</span>
+              </div>
+              <a 
+                href="https://github.com/r3e-network/znep17" 
+                target="_blank" 
+                rel="noreferrer"
+                className="flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors bg-blue-900/30 px-3 py-1.5 rounded"
+              >
+                <Info className="w-3.5 h-3.5" />
+                View Documentation
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div className="overflow-hidden rounded-xl border border-gray-700 bg-gray-800 shadow-2xl">
         <div className="flex border-b border-gray-700">
