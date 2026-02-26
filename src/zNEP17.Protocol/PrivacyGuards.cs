@@ -17,7 +17,6 @@ public static class PrivacyGuards
     public const int TreeDepth = 20;
     public const int MaxLeafIndex = 1 << TreeDepth; // 1_048_576
     public const uint ConfigUpdateDelaySeconds = 86400; // 24 hours
-    public const uint EmergencyWithdrawDelaySeconds = 604800; // 7 days
     public const uint SecurityCouncilUpdateDelaySeconds = 172800; // 48 hours
 
     public static bool IsValidDepositRequest(
@@ -59,16 +58,7 @@ public static class PrivacyGuards
             && publicInputsLength == Groth16PublicInputsLength;
     }
 
-    public static bool IsValidEmergencyWithdrawRequest(
-        bool isAssetValid,
-        bool isRecipientValid,
-        BigInteger amount)
-    {
-        return isAssetValid
-            && isRecipientValid
-            && amount > 0
-            ;
-    }
+    
 
     public static BigInteger CalculateRecipientPayout(BigInteger amount, BigInteger fee)
     {

@@ -21,7 +21,6 @@ public class zNEP17Protocol : SmartContract
     public delegate void OwnershipTransferredDelegate(UInt160 previousOwner, UInt160 newOwner);
     public delegate void PausedDelegate(bool isPaused);
     public delegate void MerkleRootUpdatedDelegate(byte[] newRoot, BigInteger leafCount);
-    public delegate void EmergencyWithdrawExecutedDelegate(UInt160 asset, UInt160 recipient, BigInteger amount);
     public delegate void SecurityCouncilUpdatedDelegate(UInt160 previousCouncil, UInt160 newCouncil);
 
     [DisplayName("PrivacyDeposit")]
@@ -257,6 +256,13 @@ public class zNEP17Protocol : SmartContract
     {
         ByteString? leaf = LeafMap().Get(index.ToByteArray());
         return leaf is null ? new byte[0] : (byte[])leaf;
+    }
+
+    [Safe]
+    public static BigInteger GetCommitmentIndex(byte[] commitment)
+    {
+        ByteString? idx = CommitmentIndexMap().Get(commitment);
+        return idx is null ? -1 : (BigInteger)idx;
     }
 
     [Safe]
@@ -535,7 +541,9 @@ public class zNEP17Protocol : SmartContract
         
         // UTXO: Append the new commitment to the Merkle tree like a deposit
         BigInteger index = NextLeafIndex();
+        ExecutionEngine.Assert(CommitmentIndexMap().Get(newCommitment!) is null, "commitment already deposited");
         LeafMap().Put(index.ToByteArray(), newCommitment!);
+        CommitmentIndexMap().Put(newCommitment!, index);
         
         TransferOut(asset, recipient, payout);
         if (fee > 0)

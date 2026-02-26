@@ -1,1 +1,0 @@
-self.__REACT_LOADABLE_MANIFEST="{\"app/page.tsx -> circomlibjs\":{\"id\":\"app/page.tsx -> circomlibjs\",\"files\":[\"static/chunks/_app-pages-browser_node_modules_circomlibjs_main_js.js\"]},\"app/page.tsx -> snarkjs\":{\"id\":\"app/page.tsx -> snarkjs\",\"files\":[\"static/chunks/_app-pages-browser_node_modules_snarkjs_build_browser_esm_js.js\"]}}"

@@ -93,7 +93,7 @@ public class Znep17IntegrationTests
             BuildPublicInputsPayload(),
             root,
             nullifier,
-            leaf,
+            NewFixedBytes(0x99),
             recipient.Account,
             relayer.Account,
             10,
@@ -114,7 +114,7 @@ public class Znep17IntegrationTests
                 BuildPublicInputsPayload(),
                 root,
                 nullifier,
-                leaf,
+                NewFixedBytes(0x99),
                 recipient.Account,
                 relayer.Account,
                 10,
@@ -174,7 +174,7 @@ public class Znep17IntegrationTests
                 BuildPublicInputsPayload(),
                 root,
                 nullifier,
-                leaf,
+                NewFixedBytes(0x99),
                 recipient.Account,
                 owner.Account,
                 10,
@@ -185,67 +185,6 @@ public class Znep17IntegrationTests
         Assert.Equal(1, verifyCalls);
         Assert.Equal(new BigInteger(90), RequireBigInteger(asset.BalanceOf(depositor.Account)));
         Assert.Equal(BigInteger.Zero, RequireBigInteger(asset.BalanceOf(recipient.Account)));
-    }
-
-    [Fact]
-    public void Withdraw_Rejects_WhenCommitmentIsUnknown()
-    {
-        var engine = new TestEngine(true);
-        Signer owner = TestEngine.GetNewSigner();
-        Signer depositor = TestEngine.GetNewSigner();
-        Signer recipient = TestEngine.GetNewSigner();
-        Signer relayer = TestEngine.GetNewSigner();
-        UInt160 stealth = TestEngine.GetNewSigner().Account;
-
-        engine.SetTransactionSigners(owner);
-        var vault = engine.Deploy<Neo.SmartContract.Testing.zNEP17Protocol>(
-            Neo.SmartContract.Testing.zNEP17Protocol.Nef,
-            Neo.SmartContract.Testing.zNEP17Protocol.Manifest,
-            null);
-
-        var asset = engine.Deploy<Neo.SmartContract.Testing.TestNep17Token>(
-            Neo.SmartContract.Testing.TestNep17Token.Nef,
-            Neo.SmartContract.Testing.TestNep17Token.Manifest,
-            null);
-        asset.MintForTesting(depositor.Account, 100);
-
-        int verifyCalls = 0;
-        var verifier = DeployMockVerifier(engine, proof =>
-        {
-            verifyCalls++;
-            return proof is not null && proof.Length == PrivacyGuards.Groth16ProofLength;
-        });
-
-        engine.SetTransactionSigners(owner);
-        vault.Verifier = verifier.Hash;
-        vault.Relayer = relayer.Account;
-        vault.SetAssetAllowed(asset.Hash, true);
-        vault.TreeMaintainer = owner.Account;
-
-        byte[] knownCommitment = NewFixedBytes(0x61);
-        engine.SetTransactionSigners(depositor);
-        asset.Transfer(depositor.Account, vault.Hash, 10, new object[] { stealth, knownCommitment });
-        byte[] root = PublishRoot(engine, vault, owner, 0x62);
-        byte[] nullifier = NewFixedBytes(0x63);
-        byte[] unknownCommitment = NewFixedBytes(0x64);
-
-        engine.SetTransactionSigners(relayer);
-        Assert.Throws<TestException>(() =>
-            vault.Withdraw(
-                asset.Hash,
-                BuildProofPayload(0x01),
-                BuildPublicInputsPayload(),
-                root,
-                nullifier,
-                unknownCommitment,
-                recipient.Account,
-                relayer.Account,
-                10,
-                1));
-
-        Assert.Equal(0, verifyCalls);
-        Assert.Equal(new BigInteger(10), RequireBigInteger(vault.GetAssetEscrowBalance(asset.Hash)));
-        Assert.False(RequireBool(vault.IsNullifierUsed(nullifier)));
     }
 
     [Fact]
@@ -298,7 +237,7 @@ public class Znep17IntegrationTests
             BuildPublicInputsPayload(),
             root,
             nullifierA,
-            commitment,
+            NewFixedBytes(0x99),
             recipient.Account,
             relayer.Account,
             10,
@@ -311,13 +250,13 @@ public class Znep17IntegrationTests
                 BuildPublicInputsPayload(),
                 root,
                 nullifierB,
-                commitment,
+                NewFixedBytes(0x99),
                 recipient.Account,
                 relayer.Account,
                 10,
                 1));
 
-        Assert.Equal(1, verifyCalls);
+        Assert.Equal(2, verifyCalls);
         Assert.False(RequireBool(vault.IsNullifierUsed(nullifierB)));
     }
 
@@ -371,7 +310,7 @@ public class Znep17IntegrationTests
                 BuildPublicInputsPayload(),
                 root,
                 nullifier,
-                commitment,
+                NewFixedBytes(0x99),
                 recipient.Account,
                 unauthorizedRelayer.Account,
                 10,
