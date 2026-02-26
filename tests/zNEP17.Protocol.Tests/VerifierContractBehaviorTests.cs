@@ -12,6 +12,44 @@ namespace zNEP17.Protocol.Tests;
 [Trait("IntegrationMode", "RealContracts")]
 public class VerifierContractBehaviorTests
 {
+
+    [Fact]
+    public void Verify_Accepts_ValidFixture_Directly()
+    {
+        var engine = new TestEngine(true);
+        var verifier = engine.Deploy<Neo.SmartContract.Testing.zNEP17Groth16Verifier>(
+            Neo.SmartContract.Testing.zNEP17Groth16Verifier.Nef,
+            Neo.SmartContract.Testing.zNEP17Groth16Verifier.Manifest,
+            null);
+
+        ValidWithdrawFixture fixture = LoadValidFixture();
+
+        UInt160 asset = UInt160.Parse(fixture.Asset);
+        UInt160 recipient = UInt160.Parse(fixture.Recipient);
+        UInt160 relayer = UInt160.Parse(fixture.Relayer);
+        BigInteger amount = BigInteger.Parse(fixture.Amount);
+        BigInteger fee = BigInteger.Parse(fixture.Fee);
+        byte[] root = Convert.FromHexString(fixture.MerkleRoot);
+        byte[] nullifier = Convert.FromHexString(fixture.NullifierHash);
+        byte[] commitment = Convert.FromHexString(fixture.Commitment);
+        byte[] proof = Convert.FromHexString(fixture.ProofHex);
+        byte[] publicInputs = Convert.FromHexString(fixture.PublicInputsHex);
+
+        bool? result = verifier.Verify(
+            asset,
+            proof,
+            publicInputs,
+            root,
+            nullifier,
+            commitment,
+            recipient,
+            relayer,
+            amount,
+            fee);
+
+        Assert.True(result);
+    }
+
     [Fact]
     public void Fixture_PublicInputs_Match_VerifierBindingOrder()
     {
@@ -29,9 +67,9 @@ public class VerifierContractBehaviorTests
         AssertSlice(publicInputs, 1 * 32, Reverse32(Convert.FromHexString(fixture.NullifierHash)));
         AssertSlice(publicInputs, 2 * 32, EncodeUInt160Scalar(recipient));
         AssertSlice(publicInputs, 3 * 32, EncodeUInt160Scalar(relayer));
-        AssertSlice(publicInputs, 4 * 32, EncodeBigIntegerScalar(amount));
-        AssertSlice(publicInputs, 5 * 32, EncodeBigIntegerScalar(fee));
-        AssertSlice(publicInputs, 6 * 32, EncodeUInt160Scalar(asset));
+        AssertSlice(publicInputs, 4 * 32, EncodeBigIntegerScalar(fee));
+        AssertSlice(publicInputs, 5 * 32, EncodeUInt160Scalar(asset));
+        AssertSlice(publicInputs, 6 * 32, EncodeBigIntegerScalar(amount));
         AssertSlice(publicInputs, 7 * 32, Reverse32(Convert.FromHexString(fixture.Commitment)));
     }
 

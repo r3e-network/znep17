@@ -218,20 +218,44 @@ async function buildWithdrawPayload({
   leafIndex,
   recipientScriptHash,
   relayerScriptHash,
-  fee
+  fee,
+  amountWithdraw
 }) {
   const merkle = computeMerkleProof(leaves, leafIndex, buildZeroHashes());
   const rootHex = toHex32(merkle.root);
+  
+  if (amountWithdraw === undefined) {
+    amountWithdraw = note.amount;
+  }
+
+  const amountChange = note.amount - amountWithdraw - BigInt(fee);
+  
+  const newNullifier = BigInt("0x" + require("node:crypto").randomBytes(31).toString("hex"));
+  const newSecret = BigInt("0x" + require("node:crypto").randomBytes(31).toString("hex"));
+  
+  const newNullifierHash = poseidon1Bls([newNullifier]);
+  const newCommitment = poseidon4Bls([newNullifier, newSecret, amountChange, note.assetField]);
+  
+  const newNote = {
+    nullifier: newNullifier,
+    secret: newSecret,
+    amount: amountChange,
+    assetField: note.assetField,
+    nullifierHash: newNullifierHash,
+    commitment: newCommitment,
+    nullifierHex: toHex32(newNullifierHash),
+    commitmentHex: toHex32(newCommitment)
+  };
 
   const publicSignalsExpected = [
     merkle.root.toString(),
     note.nullifierHash.toString(),
     BigInt(`0x${recipientScriptHash}`).toString(),
     BigInt(`0x${relayerScriptHash}`).toString(),
-    note.amount.toString(),
     BigInt(fee).toString(),
     note.assetField.toString(),
-    note.commitment.toString()
+    amountWithdraw.toString(),
+    newNote.commitment.toString()
   ];
 
   const witnessInput = {
@@ -239,12 +263,16 @@ async function buildWithdrawPayload({
     nullifierHash: note.nullifierHash.toString(),
     recipient: publicSignalsExpected[2],
     relayer: publicSignalsExpected[3],
-    amount: note.amount.toString(),
     fee: BigInt(fee).toString(),
     asset: note.assetField.toString(),
-    commitment: note.commitment.toString(),
+    amountWithdraw: amountWithdraw.toString(),
+    newCommitment: newNote.commitment.toString(),
     nullifier: note.nullifier.toString(),
     secret: note.secret.toString(),
+    amountIn: note.amount.toString(),
+    newNullifier: newNote.nullifier.toString(),
+    newSecret: newNote.secret.toString(),
+    amountChange: amountChange.toString(),
     pathElements: merkle.pathElements,
     pathIndices: merkle.pathIndices
   };
@@ -265,7 +293,7 @@ async function buildWithdrawPayload({
   return {
     rootHex,
     nullifierHex: note.nullifierHex,
-    commitmentHex: note.commitmentHex,
+    commitmentHex: newNote.commitmentHex,
     proofHex: packedProof.toString("hex"),
     publicInputsHex: packedPublicInputs.toString("hex")
   };
@@ -470,6 +498,12 @@ async function main() {
     return toBigInt(stack[0]);
   }
 
+  
+  async function readLeafCount(vaultHash) {
+    const stack = await readInvoke(vaultHash, "getLeafIndex", []);
+    return Number(stack[0].value);
+  }
+
   async function readCurrentRootHex(vaultHash) {
     const stack = await readInvoke(vaultHash, "getCurrentRoot");
     return toBytes(stack[0]).toString("hex");
@@ -651,7 +685,7 @@ async function main() {
 
   await persistInvokeAndAssert({
     label: "vault_update_root_s1",
-    invoke: () => vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadA.rootHex)], ownerSignerGlobal),
+    invoke: async () => { const count = await readLeafCount(vaultHash); return vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadA.rootHex), sc.ContractParam.integer(count)], ownerSignerGlobal); },
     expectFault: false
   });
 
@@ -665,7 +699,7 @@ async function main() {
     publicInputsHex: payloadA.publicInputsHex,
     rootHex: rootA,
     nullifierHex: nullifierA,
-    commitmentHex: leafA,
+    commitmentHex: payloadA.commitmentHex,
     recipientHash: recipientA.scriptHash,
     relayerHash: owner.scriptHash,
     amount: 10n,
@@ -687,7 +721,7 @@ async function main() {
     publicInputsHex: tamperedVerifierPublicInputs.toString("hex"),
     rootHex: rootA,
     nullifierHex: nullifierA,
-    commitmentHex: leafA,
+    commitmentHex: payloadA.commitmentHex,
     recipientHash: recipientA.scriptHash,
     relayerHash: owner.scriptHash,
     amount: 10n,
@@ -712,7 +746,7 @@ async function main() {
         stackParamByteArrayHex(payloadA.publicInputsHex),
         stackParamByteArrayHex(rootA),
         stackParamByteArrayHex(nullifierA),
-        stackParamByteArrayHex(leafA),
+        stackParamByteArrayHex(payloadA.commitmentHex),
         stackParamHash160(recipientA.address),
         stackParamHash160(owner.address),
         stackParamInteger(10),
@@ -772,7 +806,7 @@ async function main() {
 
   await persistInvokeAndAssert({
     label: "vault_update_root_s2",
-    invoke: () => vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadB.rootHex)], ownerSignerGlobal),
+    invoke: async () => { const count = await readLeafCount(vaultHash); return vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadB.rootHex), sc.ContractParam.integer(count)], ownerSignerGlobal); },
     expectFault: false
   });
 
@@ -792,7 +826,7 @@ async function main() {
         stackParamByteArrayHex(tamperedPublicInputsB.toString("hex")),
         stackParamByteArrayHex(rootB),
         stackParamByteArrayHex(nullifierB),
-        stackParamByteArrayHex(leafB),
+        stackParamByteArrayHex(payloadB.commitmentHex),
         stackParamHash160(recipientB.address),
         stackParamHash160(owner.address),
         stackParamInteger(10),
@@ -820,7 +854,7 @@ async function main() {
         stackParamByteArrayHex(payloadB.publicInputsHex),
         stackParamByteArrayHex(rootB),
         stackParamByteArrayHex(nullifierB),
-        stackParamByteArrayHex(leafB),
+        stackParamByteArrayHex(payloadB.commitmentHex),
         stackParamHash160(recipientB.address),
         stackParamHash160(owner.address),
         stackParamInteger(10),
@@ -871,7 +905,7 @@ async function main() {
 
   await persistInvokeAndAssert({
     label: "vault_update_root_s3",
-    invoke: () => vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadC.rootHex)], ownerSignerGlobal),
+    invoke: async () => { const count = await readLeafCount(vaultHash); return vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadC.rootHex), sc.ContractParam.integer(count)], ownerSignerGlobal); },
     expectFault: false
   });
 
@@ -890,7 +924,7 @@ async function main() {
         stackParamByteArrayHex(payloadC.publicInputsHex),
         stackParamByteArrayHex(unknownRoot),
         stackParamByteArrayHex(nullifierC),
-        stackParamByteArrayHex(leafC),
+        stackParamByteArrayHex(payloadC.commitmentHex),
         stackParamHash160(recipientC.address),
         stackParamHash160(owner.address),
         stackParamInteger(10),
@@ -918,7 +952,7 @@ async function main() {
         stackParamByteArrayHex(payloadC.publicInputsHex),
         stackParamByteArrayHex(rootC),
         stackParamByteArrayHex(nullifierC),
-        stackParamByteArrayHex(leafC),
+        stackParamByteArrayHex(payloadC.commitmentHex),
         stackParamHash160(recipientC.address),
         stackParamHash160(owner.address),
         stackParamInteger(10),
@@ -968,7 +1002,7 @@ async function main() {
 
   await persistInvokeAndAssert({
     label: "vault_update_root_s4",
-    invoke: () => vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadD.rootHex)], ownerSignerGlobal),
+    invoke: async () => { const count = await readLeafCount(vaultHash); return vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadD.rootHex), sc.ContractParam.integer(count)], ownerSignerGlobal); },
     expectFault: false
   });
 
@@ -986,7 +1020,7 @@ async function main() {
         stackParamByteArrayHex(payloadD.publicInputsHex),
         stackParamByteArrayHex(rootD),
         stackParamByteArrayHex(nullifierD),
-        stackParamByteArrayHex(leafD),
+        stackParamByteArrayHex(payloadD.commitmentHex),
         stackParamHash160(recipientD.address),
         stackParamHash160(owner.address),
         stackParamInteger(10),
@@ -1014,7 +1048,7 @@ async function main() {
         stackParamByteArrayHex(payloadD.publicInputsHex),
         stackParamByteArrayHex(rootD),
         stackParamByteArrayHex(nullifierD),
-        stackParamByteArrayHex(leafD),
+        stackParamByteArrayHex(payloadD.commitmentHex),
         stackParamHash160(recipientD.address),
         stackParamHash160(owner.address),
         stackParamInteger(10),
@@ -1064,7 +1098,7 @@ async function main() {
 
   await persistInvokeAndAssert({
     label: "vault_update_root_s4b",
-    invoke: () => vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadG.rootHex)], ownerSignerGlobal),
+    invoke: async () => { const count = await readLeafCount(vaultHash); return vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadG.rootHex), sc.ContractParam.integer(count)], ownerSignerGlobal); },
     expectFault: false
   });
 
@@ -1082,7 +1116,7 @@ async function main() {
         stackParamByteArrayHex(payloadG.publicInputsHex),
         stackParamByteArrayHex(rootG),
         stackParamByteArrayHex(nullifierG),
-        stackParamByteArrayHex(leafG),
+        stackParamByteArrayHex(payloadG.commitmentHex),
         stackParamHash160(recipientG.address),
         stackParamHash160(owner.address),
         stackParamInteger(9),
@@ -1110,7 +1144,7 @@ async function main() {
         stackParamByteArrayHex(payloadG.publicInputsHex),
         stackParamByteArrayHex(rootG),
         stackParamByteArrayHex(nullifierG),
-        stackParamByteArrayHex(leafG),
+        stackParamByteArrayHex(payloadG.commitmentHex),
         stackParamHash160(recipientG.address),
         stackParamHash160(owner.address),
         stackParamInteger(10),
@@ -1160,7 +1194,7 @@ async function main() {
 
   await persistInvokeAndAssert({
     label: "vault_update_root_s5",
-    invoke: () => vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadF.rootHex)], ownerSignerGlobal),
+    invoke: async () => { const count = await readLeafCount(vaultHash); return vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadF.rootHex), sc.ContractParam.integer(count)], ownerSignerGlobal); },
     expectFault: false
   });
 
@@ -1177,7 +1211,7 @@ async function main() {
         stackParamByteArrayHex(payloadF.publicInputsHex),
         stackParamByteArrayHex(rootF),
         stackParamByteArrayHex(nullifierF),
-        stackParamByteArrayHex(leafF),
+        stackParamByteArrayHex(payloadF.commitmentHex),
         stackParamHash160(recipientF.address),
         stackParamHash160(owner.address),
         stackParamInteger(10),
@@ -1200,7 +1234,7 @@ async function main() {
         stackParamByteArrayHex(payloadF.publicInputsHex),
         stackParamByteArrayHex(rootF),
         stackParamByteArrayHex(nullifierF),
-        stackParamByteArrayHex(leafF),
+        stackParamByteArrayHex(payloadF.commitmentHex),
         stackParamHash160(recipientF.address),
         stackParamHash160(owner.address),
         stackParamInteger(10),
@@ -1327,7 +1361,7 @@ async function main() {
 
   await persistInvokeAndAssert({
     label: "vault_no_verifier_update_root_s6",
-    invoke: () => vaultNoVerifierContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadE.rootHex)], altOwnerSignerGlobal),
+    invoke: async () => { const count = await readLeafCount(vaultNoVerifierHash); return vaultNoVerifierContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadE.rootHex), sc.ContractParam.integer(count)], altOwnerSignerGlobal); },
     expectFault: false
   });
 
@@ -1345,7 +1379,7 @@ async function main() {
         stackParamByteArrayHex(payloadE.publicInputsHex),
         stackParamByteArrayHex(rootE),
         stackParamByteArrayHex(nullifierE),
-        stackParamByteArrayHex(leafE),
+        stackParamByteArrayHex(payloadE.commitmentHex),
         stackParamHash160(recipientE.address),
         stackParamHash160(altOwner.address),
         stackParamInteger(10),

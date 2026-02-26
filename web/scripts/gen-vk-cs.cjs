@@ -19,7 +19,7 @@ function convertFfCompressedToNeo(bytes) {
 }
 
 async function main() {
-  const vkPath = path.resolve(__dirname, '../../circuits/verification_key.json');
+  const vkPath = path.resolve(__dirname, '../../circuits/bls/verification_key.json');
   const vk = JSON.parse(fs.readFileSync(vkPath, 'utf8'));
   const curve = await ffjavascript.getCurveFromName('bls12381');
 

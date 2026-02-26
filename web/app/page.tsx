@@ -254,7 +254,6 @@ export default function Home() {
   const [vaultHash, setVaultHash] = useState("");
   const [relayVaultHash, setRelayVaultHash] = useState("");
   const [stealthAddress, setStealthAddress] = useState("");
-  const [leafHex, setLeafHex] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [txHash, setTxHash] = useState("");
@@ -360,33 +359,6 @@ export default function Home() {
   }, [loadRelayConfig]);
 
   useEffect(() => {
-    if (!secretHex || !nullifierPrivHex) {
-      return;
-    }
-
-    let cancelled = false;
-    const syncCommitment = async () => {
-      try {
-        const assetScriptHash = normalizeHash160(tokenHash, "Token script hash");
-        const amountInt = decimalToFixed8(amount);
-        const noteArtifacts = await deriveNoteArtifacts(secretHex, nullifierPrivHex, amountInt, assetScriptHash);
-        if (!cancelled) {
-          setLeafHex(noteArtifacts.commitmentHex);
-        }
-      } catch {
-        if (!cancelled) {
-          setLeafHex("");
-        }
-      }
-    };
-
-    void syncCommitment();
-    return () => {
-      cancelled = true;
-    };
-  }, [amount, nullifierPrivHex, secretHex, tokenHash]);
-
-  useEffect(() => {
     const hasPending = localStorage.getItem("znep17_has_pending");
     if (hasPending === "true") {
        const lsSecret = localStorage.getItem("znep17_last_secret");
@@ -456,7 +428,6 @@ export default function Home() {
       const amountInt = decimalToFixed8(amount);
       const noteArtifacts = await deriveNoteArtifacts(secretHex, nullifierPrivHex, amountInt, assetScriptHash);
       const normalizedLeaf = noteArtifacts.commitmentHex;
-      setLeafHex(normalizedLeaf);
 
       const result = await neoline.invoke({
         scriptHash: `0x${assetScriptHash}`,
@@ -506,11 +477,35 @@ export default function Home() {
       const recipientScriptHash = toHash160(recipient, "Recipient");
       const relayerScriptHash = toHash160(relayer, "Relayer");
 
+      const noteAmountRaw = ticketAmount.trim().length > 0 ? ticketAmount : amount;
+      const noteAmountInt = decimalToFixed8(noteAmountRaw);
       const amountInt = decimalToFixed8(amount);
       const feeInt = RELAYER_FEE_FIXED8;
+      const feeBigInt = BigInt(feeInt);
+      const noteAmountBigInt = BigInt(noteAmountInt);
+      const amountWithdrawBigInt = BigInt(amountInt);
+      if (amountWithdrawBigInt <= feeBigInt) {
+        throw new Error("Withdraw amount must be greater than fee.");
+      }
+      if (amountWithdrawBigInt + feeBigInt > noteAmountBigInt) {
+        throw new Error("Withdraw amount plus fee exceeds note amount.");
+      }
+      const amountChangeBigInt = noteAmountBigInt - amountWithdrawBigInt - feeBigInt;
       const recipientInt = BigInt(`0x${recipientScriptHash}`).toString();
       const relayerInt = BigInt(`0x${relayerScriptHash}`).toString();
-      const noteArtifacts = await deriveNoteArtifacts(secretHex, nullifierPrivHex, amountInt, assetScriptHash);
+      const noteArtifacts = await deriveNoteArtifacts(secretHex, nullifierPrivHex, noteAmountInt, assetScriptHash);
+      const newNullifierHex = randomHex(31);
+      const newSecretHex = randomHex(31);
+      const newNullifierBigInt = BigInt(`0x${newNullifierHex}`);
+      const newSecretBigInt = BigInt(`0x${newSecretHex}`);
+      const newCommitmentField = poseidon4Bls([
+        newNullifierBigInt,
+        newSecretBigInt,
+        amountChangeBigInt,
+        BigInt(`0x${assetScriptHash}`),
+      ]);
+      const newCommitmentDecimal = newCommitmentField.toString();
+      const newCommitmentHex = newCommitmentField.toString(16).padStart(64, "0");
 
       setZkStatus("Fetching Merkle proof from relay...");
       const merkleProof = await fetchMerkleProofFromRelay(noteArtifacts.commitmentHex);
@@ -523,12 +518,16 @@ export default function Home() {
         nullifierHash: noteArtifacts.nullifierHashDecimal,
         recipient: recipientInt,
         relayer: relayerInt,
-        amount: amountInt,
         fee: feeInt,
         asset: noteArtifacts.assetDecimal,
-        commitment: noteArtifacts.commitmentDecimal,
+        amountWithdraw: amountInt,
+        newCommitment: newCommitmentDecimal,
         nullifier: BigInt(`0x${nullifierPrivHex.trim().toLowerCase()}`).toString(),
         secret: BigInt(`0x${secretHex.trim().toLowerCase()}`).toString(),
+        amountIn: noteAmountInt,
+        newNullifier: newNullifierBigInt.toString(),
+        newSecret: newSecretBigInt.toString(),
+        amountChange: amountChangeBigInt.toString(),
         pathElements: merkleProof.pathElements,
         pathIndices: merkleProof.pathIndices,
       };
@@ -560,6 +559,7 @@ export default function Home() {
         merkleRoot: merkleRootHex,
         nullifierHash: noteArtifacts.nullifierHashHex,
         commitment: noteArtifacts.commitmentHex,
+        newCommitment: newCommitmentHex,
         recipient,
         relayer,
         amount: amountInt,
@@ -595,10 +595,6 @@ export default function Home() {
       setSecretHex(sec);
       setNullifierPrivHex(nul);
 
-      const assetScriptHash = normalizeHash160(tokenHash, "Token script hash");
-      const amountInt = decimalToFixed8(amount);
-      const noteArtifacts = await deriveNoteArtifacts(sec, nul, amountInt, assetScriptHash);
-      setLeafHex(noteArtifacts.commitmentHex);
       localStorage.setItem("znep17_last_secret", sec);
       localStorage.setItem("znep17_last_nullifier", nul);
       localStorage.setItem("znep17_last_amount", amount);

@@ -53,6 +53,7 @@ type RelayRequestBody = {
   merkleRoot: string;
   nullifierHash: string;
   commitment: string;
+  newCommitment: string;
   recipient: string;
   relayer: string;
   amount: string;
@@ -207,6 +208,9 @@ function validateRelayConfig(): string[] {
 
   if (RELAYER_REQUIRE_ORIGIN_ALLOWLIST && !originAllowlist) {
     issues.push("RELAYER_ALLOWED_ORIGINS is required by relayer policy.");
+  }
+  if (originAllowlist && hasInsecureOriginRule(originAllowlist)) {
+    issues.push("RELAYER_ALLOWED_ORIGINS must use https:// origins.");
   }
 
   
@@ -663,14 +667,6 @@ async function getCurrentRootOnChain(vaultScriptHash: string): Promise<string | 
   return rootHex;
 }
 
-async function isCommitmentSpentOnChain(vaultScriptHash: string, commitmentHex: string): Promise<boolean> {
-  try {
-    return await callVaultBoolMethod(vaultScriptHash, "isCommitmentSpent", commitmentHex);
-  } catch {
-    return await callVaultBoolMethod(vaultScriptHash, "IsCommitmentSpent", commitmentHex);
-  }
-}
-
 async function getCommitmentIndexOnChain(vaultScriptHash: string, commitmentHex: string): Promise<number> {
   try {
     return await callVaultIntegerMethod(vaultScriptHash, "getCommitmentIndex", commitmentHex);
@@ -1041,6 +1037,7 @@ export async function POST(req: Request) {
       typeof body?.merkleRoot !== "string" ||
       typeof body?.nullifierHash !== "string" ||
       typeof body?.commitment !== "string" ||
+      typeof body?.newCommitment !== "string" ||
       typeof body?.recipient !== "string" ||
       typeof body?.relayer !== "string" ||
       typeof body?.amount !== "string" ||
@@ -1071,6 +1068,7 @@ export async function POST(req: Request) {
     let recipientScriptHash: string;
     let nullifierHashHex: string;
     let commitmentHex: string;
+    let newCommitmentHex: string;
     let merkleRootHex: string;
     let amount: bigint;
     let fee: bigint;
@@ -1095,6 +1093,7 @@ export async function POST(req: Request) {
       merkleRootHex = normalizeHex32(body.merkleRoot, "merkleRoot");
       nullifierHashHex = normalizeHex32(body.nullifierHash, "nullifierHash");
       commitmentHex = normalizeHex32(body.commitment, "commitment");
+      newCommitmentHex = normalizeHex32(body.newCommitment, "newCommitment");
       amount = parseIntString(body.amount, "amount");
       fee = parseIntString(body.fee, "fee");
 
@@ -1104,10 +1103,10 @@ export async function POST(req: Request) {
         BigInt(`0x${nullifierHashHex}`).toString(),
         hash160ToFieldDecimal(recipientScriptHash),
         hash160ToFieldDecimal(serverRelayerScriptHash),
-        amount.toString(),
         fee.toString(),
         hash160ToFieldDecimal(tokenScriptHash),
-        BigInt(`0x${commitmentHex}`).toString(),
+        amount.toString(),
+        BigInt(`0x${newCommitmentHex}`).toString(),
       ];
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Invalid request fields.";
@@ -1141,10 +1140,9 @@ export async function POST(req: Request) {
     }
     lockedNullifierHex = nullifierHashHex;
 
-    const [knownRoot, usedNullifier, spentCommitment, commitmentIndex] = await Promise.all([
+    const [knownRoot, usedNullifier, commitmentIndex] = await Promise.all([
       isKnownRootOnChain(vaultScriptHash, merkleRootHex),
       isNullifierUsedOnChain(vaultScriptHash, nullifierHashHex),
-      isCommitmentSpentOnChain(vaultScriptHash, commitmentHex),
       getCommitmentIndexOnChain(vaultScriptHash, commitmentHex),
     ]);
     if (!knownRoot) {
@@ -1158,10 +1156,6 @@ export async function POST(req: Request) {
     if (usedNullifier) {
       await unlockNullifier();
       return NextResponse.json({ error: "Nullifier already used." }, { status: 409 });
-    }
-    if (spentCommitment) {
-      await unlockNullifier();
-      return NextResponse.json({ error: "Commitment already spent." }, { status: 409 });
     }
 
     if (RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER) {
@@ -1182,7 +1176,7 @@ export async function POST(req: Request) {
         tokenScriptHash,
         merkleRootHex,
         nullifierHashHex,
-        commitmentHex,
+        newCommitmentHex,
         recipientScriptHash,
         serverRelayerScriptHash,
       );
@@ -1211,7 +1205,7 @@ export async function POST(req: Request) {
       sc.ContractParam.byteArray(publicInputsPayload),
       sc.ContractParam.byteArray(toBase64Hex(merkleRootHex)),
       sc.ContractParam.byteArray(toBase64Hex(nullifierHashHex)),
-      sc.ContractParam.byteArray(toBase64Hex(commitmentHex)),
+      sc.ContractParam.byteArray(toBase64Hex(newCommitmentHex)),
       sc.ContractParam.hash160(recipientScriptHash),
       sc.ContractParam.hash160(serverRelayerScriptHash),
       sc.ContractParam.integer(amount.toString()),

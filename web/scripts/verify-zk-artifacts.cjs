@@ -5,9 +5,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const EXPECTED_SHA256 = {
-  "public/zk/withdraw.wasm": "72ce3e5ea2fbc36aa5c7aaee6086d2a42089a0c04f4f9c937fe610f2e9036861",
-  "public/zk/withdraw_final.zkey": "b1f8e32f035314fb2c6e3d34f3243c4828d76ab95ac3aaa66817e5abe17ab6b2",
-  "public/zk/verification_key.json": "57f6b84ef71c6bf76a09894ed1601d4823b9971ad742d3be9a4629e09afbd130",
+  "public/zk/withdraw.wasm": "c329494842e19a64636c2016e146f8acdc183dfa020e1cc17f1178709335b3f4",
+  "public/zk/withdraw_final.zkey": "4cb86b892500ee8373e87af086330a978543045e636ea9190130aee2e5ad2c35",
+  "public/zk/verification_key.json": "8406e77843e66c547a2ddba380e601b71d4c35d9bc80dd4f71a3f52bf888626f",
 };
 
 function sha256File(filePath) {

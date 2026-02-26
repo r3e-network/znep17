@@ -50,6 +50,7 @@ function buildValidPostBody(overrides?: Partial<Record<string, unknown>>): Recor
     merkleRoot: `0x${"11".repeat(32)}`,
     nullifierHash: `0x${"12".repeat(32)}`,
     commitment: `0x${"13".repeat(32)}`,
+    newCommitment: `0x${"14".repeat(32)}`,
     recipient: `0x${"44".repeat(20)}`,
     relayer: relayer.scriptHash,
     amount: "10",
@@ -261,5 +262,58 @@ describe("relay GET proof policy", () => {
 
     expect(res.status).toBe(400);
     expect(payload.error).toContain("exactly 8 values");
+  });
+
+  it("returns 400 when newCommitment is missing from POST body", async () => {
+    setBaseEnv();
+    const { POST } = await loadRouteModule();
+    const body = buildValidPostBody({
+      publicInputs: ["0", "0", "0", "0", "0", "0", "0"],
+    });
+    delete body.newCommitment;
+    const req = new Request("https://relay.example.com/api/relay", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    const res = await POST(req);
+    const payload = (await res.json()) as { error?: string };
+
+    expect(res.status).toBe(400);
+    expect(payload.error).toBe("Invalid request fields.");
+  });
+
+  it("fails configuration when origin allowlist contains insecure http origins in production", async () => {
+    setBaseEnv();
+    const env = process.env as Record<string, string | undefined>;
+    env["NODE_ENV"] = "production";
+    env["VERCEL_ENV"] = "production";
+    env["RPC_URL"] = "https://n3seed1.ngd.network:20332";
+    env["RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER"] = "true";
+    env["RELAYER_EXPECTED_VERIFIER_HASH"] = `0x${"55".repeat(20)}`;
+    env["RELAYER_REQUIRE_ORIGIN_ALLOWLIST"] = "true";
+    env["RELAYER_ALLOWED_ORIGINS"] = "http://app.example.com";
+    env["ALLOWED_TOKEN_HASHES"] = `0x${"33".repeat(20)}`;
+    env["RELAYER_REQUIRE_DURABLE_GUARDS"] = "true";
+    env["KV_REST_API_URL"] = "https://example.upstash.io";
+    env["KV_REST_API_TOKEN"] = "token";
+    env["RELAYER_REQUIRE_AUTH"] = "false";
+
+    const { GET } = await loadRouteModule();
+    const req = new Request("https://relay.example.com/api/relay", {
+      method: "GET",
+      headers: { origin: "https://app.example.com" },
+    });
+
+    const res = await GET(req);
+    const payload = (await res.json()) as { configured?: boolean; issues?: string[] };
+
+    expect(res.status).toBe(503);
+    expect(payload.configured).toBe(false);
+    expect(Array.isArray(payload.issues)).toBe(true);
+    expect(payload.issues?.some((issue) => issue.includes("RELAYER_ALLOWED_ORIGINS must use https:// origins."))).toBe(true);
   });
 });
