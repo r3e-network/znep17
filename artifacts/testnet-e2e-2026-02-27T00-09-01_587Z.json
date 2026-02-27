@@ -1,0 +1,452 @@
+{
+  "startedAtUtc": "2026-02-27T00:05:23.009Z",
+  "rpc": "https://n3seed1.ngd.network:20332",
+  "networkMagic": 894710606,
+  "accounts": {
+    "funder": {
+      "address": "NLtL2v28d7TyMEaXcPqtekunkFRksJ7wxu",
+      "scriptHash": "13ef519c362973f9a34648a9eac5b71250b2a80a"
+    },
+    "owner": {
+      "address": "NcxmXuecYcGWXvqxB2xjxH4t3Lg7JgerFL",
+      "scriptHash": "fd52067725b361a2355d2202c4fa2892bea801bb"
+    },
+    "altOwner": {
+      "address": "NiCXeDK2uC1pRcfz5H9oWYqJpwmZMQhpSZ",
+      "scriptHash": "1b3ee8da8c9e44b351d5a6c7216346c8028474f4"
+    }
+  },
+  "contracts": {
+    "token": {
+      "hash": "b498dbd8ae1fcaac3945c98272d902fbf1b43360",
+      "name": "TestNep17Token",
+      "checksum": 2226581547
+    },
+    "verifier": {
+      "hash": "5cbe743edbdd4c10afe9935c84b5a48044d27ea9",
+      "name": "zNEP17Groth16Verifier",
+      "checksum": 3639164121
+    },
+    "vaultMain": {
+      "hash": "2027c5a3e75de628ef27a02127cebefde92b99ff",
+      "name": "zNEP17Protocol",
+      "checksum": 2943765842
+    },
+    "vaultNoVerifier": {
+      "hash": "9e1e0e38936f50dd874ecd5840ea063ede0f0584",
+      "name": "zNEP17Protocol",
+      "checksum": 2943765842
+    }
+  },
+  "txs": [
+    {
+      "label": "fund_owner_gas",
+      "txid": "0xf883c3eb8ff54c51cffbaf0f305a5f4cf8d88b4890f42a5a9b68bea89cabc2f2",
+      "vmstate": "HALT",
+      "gasconsumed": "215926",
+      "exception": null
+    },
+    {
+      "label": "token_deploy",
+      "txid": "0xb3e9699fe9a4f829042cb8c8ccc878d57f4e50db364bc37143f7b6b2cec70e29",
+      "vmstate": "HALT",
+      "gasconsumed": "1000035859",
+      "exception": null
+    },
+    {
+      "label": "verifier_deploy",
+      "txid": "0x92be423aa2a8dc7f85618ee2ad2ea90237d4eebefb3230f9aa1cd882d490b079",
+      "vmstate": "HALT",
+      "gasconsumed": "1000035859",
+      "exception": null
+    },
+    {
+      "label": "vaultMain_deploy",
+      "txid": "0xa19bc4f828e890b77726dc72aa9624933bc56a1714fbb52967e23a52b778934c",
+      "vmstate": "HALT",
+      "gasconsumed": "1000296756",
+      "exception": null
+    },
+    {
+      "label": "vault_set_verifier_main",
+      "txid": "0x904a7402638a93803bf088ad2aaed0522eb392d0f3e6403187d56c97dc99e047",
+      "vmstate": "HALT",
+      "gasconsumed": "314173",
+      "exception": null
+    },
+    {
+      "label": "vault_set_relayer_main",
+      "txid": "0x08ee33c2f1eb990438b4964827381856f1179016ec2c419aaed8787b4ca2b84e",
+      "vmstate": "HALT",
+      "gasconsumed": "314173",
+      "exception": null
+    },
+    {
+      "label": "vault_allow_asset_main",
+      "txid": "0x9db4f87b5201461eb57ec4a2fde003ad89bfc9a8201cd90cb7a9a99e831b83ab",
+      "vmstate": "HALT",
+      "gasconsumed": "296902",
+      "exception": null
+    },
+    {
+      "label": "vault_set_tree_maintainer_main",
+      "txid": "0x24db33e716c955724ffef15633c8b281e11a04aa746a9d04320c1c351b5257e2",
+      "vmstate": "HALT",
+      "gasconsumed": "280752",
+      "exception": null
+    },
+    {
+      "label": "token_mint_owner_initial",
+      "txid": "0x6fc55f466e0755be6e83f9e39004dbe153dfead6ac9b982d448a21bd6df948b7",
+      "vmstate": "HALT",
+      "gasconsumed": "314819",
+      "exception": null
+    },
+    {
+      "label": "vault_deposit_s1",
+      "txid": "0x2291238bd4110f13eaa50d11a33d7a12f5843201689181743320096edf28128b",
+      "vmstate": "HALT",
+      "gasconsumed": "1219017",
+      "exception": null
+    },
+    {
+      "label": "vault_update_root_s1",
+      "txid": "0x9dd055a2c929b4ce290289e8df61bccb50e54d3c6c8d0c69546a3a8d72281f5a",
+      "vmstate": "HALT",
+      "gasconsumed": "730625",
+      "exception": null
+    },
+    {
+      "label": "vault_withdraw_success_s1",
+      "txid": "0xb7ed80035f64cea4e495e8f7020948501caf57b6f6445da19197b2c1bcf44ef8",
+      "vmstate": "HALT",
+      "gasconsumed": "72470783",
+      "exception": null
+    },
+    {
+      "label": "vault_deposit_s2",
+      "txid": "0xf2df6c9b2455cd5df604bac0db5fed66edbb3880d1f85bfe49b515416152ac60",
+      "vmstate": "HALT",
+      "gasconsumed": "1221017",
+      "exception": null
+    },
+    {
+      "label": "vault_update_root_s2",
+      "txid": "0x51f0265a6f4c9713123f012b256143c93eeeefe89db8f0f218e64f5d136bf605",
+      "vmstate": "HALT",
+      "gasconsumed": "712822",
+      "exception": null
+    },
+    {
+      "label": "vault_withdraw_invalid_proof_s2",
+      "txid": "0x9501b5a346f538e0a63cab66276c3d2c66ab61201eb20108dfb6e0e7403a09f6",
+      "vmstate": "FAULT",
+      "gasconsumed": "934251",
+      "exception": "ABORTMSG is executed. Reason: zk proof invalid"
+    },
+    {
+      "label": "vault_withdraw_cleanup_s2",
+      "txid": "0x29c7937a6856157258aab0df39219728b5a28ddb99098350b5e2dffa4138c774",
+      "vmstate": "HALT",
+      "gasconsumed": "72470783",
+      "exception": null
+    },
+    {
+      "label": "vault_deposit_s3",
+      "txid": "0xeb075efce50ef7a2006eb1155b82addfa560bc3997924f6928bd8b979d4420c2",
+      "vmstate": "HALT",
+      "gasconsumed": "1221017",
+      "exception": null
+    },
+    {
+      "label": "vault_update_root_s3",
+      "txid": "0xabea4258ddee361b906c560ff621a03a281ba536a0c6c3fd3b4a8d15852fee98",
+      "vmstate": "HALT",
+      "gasconsumed": "712822",
+      "exception": null
+    },
+    {
+      "label": "vault_withdraw_unknown_root_s3",
+      "txid": "0x96ad379bf0db8b870fe6538799f369a709934ffc11d4d4cd4b74f8c1c2045a65",
+      "vmstate": "FAULT",
+      "gasconsumed": "420619",
+      "exception": "ABORTMSG is executed. Reason: unknown merkle root"
+    },
+    {
+      "label": "vault_withdraw_cleanup_s3",
+      "txid": "0x872c37e036939f59686a212ec57b20e9fbb9146836ce967d51419a25acec70d1",
+      "vmstate": "HALT",
+      "gasconsumed": "72470783",
+      "exception": null
+    },
+    {
+      "label": "vault_deposit_s4",
+      "txid": "0xffa0f06ea73fd7580d00e16ea0bf265f32aec67c3d001edc675ed702eb40caa8",
+      "vmstate": "HALT",
+      "gasconsumed": "1221017",
+      "exception": null
+    },
+    {
+      "label": "vault_update_root_s4",
+      "txid": "0x0a0f48d9254aba6ce7c2b50e27e6d0c6b4ad3e53b5964ec04a61871b9987c20d",
+      "vmstate": "HALT",
+      "gasconsumed": "712822",
+      "exception": null
+    },
+    {
+      "label": "vault_withdraw_fee_ge_amount_s4",
+      "txid": "0x84ad98a00ee757da3ecf5b4ee0ac78820d5ba2d8c226685e3e3992b1a8d0cae1",
+      "vmstate": "FAULT",
+      "gasconsumed": "320175",
+      "exception": "ABORTMSG is executed. Reason: invalid withdraw arguments"
+    },
+    {
+      "label": "vault_withdraw_cleanup_s4",
+      "txid": "0x9bf3bd40002bb45c040da3654d7dba1a67aece56ae42df987165bef87e04d0cc",
+      "vmstate": "HALT",
+      "gasconsumed": "72470783",
+      "exception": null
+    },
+    {
+      "label": "vault_deposit_s4b",
+      "txid": "0xa68f3b74dbb355454248dcca5a42aceb5bde7530c66e685e27d6aea2328c3762",
+      "vmstate": "HALT",
+      "gasconsumed": "1221017",
+      "exception": null
+    },
+    {
+      "label": "vault_update_root_s4b",
+      "txid": "0x174a4fc68875df1c7ae6f7e69a19cb618b5c204e1cccd3f1900e463d98062917",
+      "vmstate": "HALT",
+      "gasconsumed": "712822",
+      "exception": null
+    },
+    {
+      "label": "vault_withdraw_amount_binding_s4b",
+      "txid": "0xb2d08409c54b2cb1b34e5c3599a3315a227eaa33251949d8ea083cf83397290c",
+      "vmstate": "FAULT",
+      "gasconsumed": "1811704",
+      "exception": "ABORTMSG is executed. Reason: zk proof invalid"
+    },
+    {
+      "label": "vault_withdraw_cleanup_s4b",
+      "txid": "0xe20a7a75394a7d6c23750a38fa100d56970f465b976fe7e74abca9b19696b5c2",
+      "vmstate": "HALT",
+      "gasconsumed": "72470783",
+      "exception": null
+    },
+    {
+      "label": "vault_deposit_s5",
+      "txid": "0x196601a53d722097979ad46390bc921d4f015be2369ecb409ecb3f5cae969cfc",
+      "vmstate": "HALT",
+      "gasconsumed": "1221017",
+      "exception": null
+    },
+    {
+      "label": "vault_update_root_s5",
+      "txid": "0x2ea633025c5d925a8e054b8f16a77dd90575f0d99c5d24d5f3ad447a9f252d9f",
+      "vmstate": "HALT",
+      "gasconsumed": "712822",
+      "exception": null
+    },
+    {
+      "label": "vault_withdraw_first_s5",
+      "txid": "0x9181373a59f67b8a4294e3cb49dd11b267d955298cbf51f392fb52266eb46184",
+      "vmstate": "HALT",
+      "gasconsumed": "72470783",
+      "exception": null
+    },
+    {
+      "label": "vault_withdraw_replay_s5",
+      "txid": "0x5a3c1ada876665b674ac1d9559a12fa414ed96d15e18f239384f567c26510889",
+      "vmstate": "FAULT",
+      "gasconsumed": "469234",
+      "exception": "ABORTMSG is executed. Reason: nullifier already used"
+    },
+    {
+      "label": "fund_alt_owner_gas_s6",
+      "txid": "0xbc18a7f9a6d0cdddf46a1762d35408a3525458cf30be7ea6816a709890b5c5f7",
+      "vmstate": "HALT",
+      "gasconsumed": "215926",
+      "exception": null
+    },
+    {
+      "label": "vaultNoVerifier_deploy",
+      "txid": "0xc996e80b43eac98bc482008ccc15a485e56ebffaafacf973b9b57b366c743a7a",
+      "vmstate": "HALT",
+      "gasconsumed": "1000296756",
+      "exception": null
+    },
+    {
+      "label": "vault_no_verifier_set_relayer_s6",
+      "txid": "0x53f6d8a8ab84ab45da1f4c2082313bd89a309ea2702840086ed63ec6858b1f35",
+      "vmstate": "HALT",
+      "gasconsumed": "314173",
+      "exception": null
+    },
+    {
+      "label": "vault_no_verifier_allow_asset_s6",
+      "txid": "0x638444876a4e655f40c217b392d2cb8e52e06135f721b2698a80e52548252720",
+      "vmstate": "HALT",
+      "gasconsumed": "296902",
+      "exception": null
+    },
+    {
+      "label": "token_mint_alt_owner_s6",
+      "txid": "0x086b809cd9475f2907f06c6be30c080ffaff66c148afdc55447e5cea4dba775c",
+      "vmstate": "HALT",
+      "gasconsumed": "311815",
+      "exception": null
+    },
+    {
+      "label": "vault_no_verifier_set_tree_maintainer_s6",
+      "txid": "0x12d0f526291bc2c89f75fbc363a771c4f752fdf2de7dfd789fffa275ca6a59b7",
+      "vmstate": "HALT",
+      "gasconsumed": "280752",
+      "exception": null
+    },
+    {
+      "label": "vault_no_verifier_deposit_s6",
+      "txid": "0x862f2608cde19953b74a5b07800732d116eea1100e55cfb262de9e679bb4a3bf",
+      "vmstate": "HALT",
+      "gasconsumed": "1219017",
+      "exception": null
+    },
+    {
+      "label": "vault_no_verifier_update_root_s6",
+      "txid": "0xb224f1aea2274bab97de7c2585c89627d018e1a4c8171e62dd6a553b262fce4e",
+      "vmstate": "HALT",
+      "gasconsumed": "730625",
+      "exception": null
+    },
+    {
+      "label": "vault_no_verifier_withdraw_fail_s6",
+      "txid": "0xc2acbea42d95a25a6a41de7253c5c0bc0cac4c7df4eaf2af4af16fa5d3e6c826",
+      "vmstate": "FAULT",
+      "gasconsumed": "503251",
+      "exception": "ABORTMSG is executed. Reason: zk proof invalid"
+    }
+  ],
+  "assertions": [
+    {
+      "label": "funder_has_gas",
+      "expected": "> 120",
+      "actual": 4500.34186584,
+      "pass": true
+    },
+    {
+      "label": "owner_has_gas",
+      "expected": "> 80",
+      "actual": 120,
+      "pass": true
+    },
+    {
+      "label": "verifier_manifest_public_method_surface",
+      "expected": "verify only",
+      "actual": "verify",
+      "pass": true
+    },
+    {
+      "label": "verifier_direct_accepts_valid_proof",
+      "expected": true,
+      "actual": true,
+      "pass": true
+    },
+    {
+      "label": "verifier_direct_rejects_tampered_public_inputs",
+      "expected": false,
+      "actual": false,
+      "pass": true
+    },
+    {
+      "label": "vault_withdraw_invalid_proof_s2_exception_contains",
+      "expected": "zk proof invalid",
+      "actual": "ABORTMSG is executed. Reason: zk proof invalid",
+      "pass": true
+    },
+    {
+      "label": "vault_withdraw_unknown_root_s3_exception_contains",
+      "expected": "unknown merkle root",
+      "actual": "ABORTMSG is executed. Reason: unknown merkle root",
+      "pass": true
+    },
+    {
+      "label": "vault_withdraw_fee_ge_amount_s4_exception_contains",
+      "expected": "invalid withdraw arguments",
+      "actual": "ABORTMSG is executed. Reason: invalid withdraw arguments",
+      "pass": true
+    },
+    {
+      "label": "vault_withdraw_amount_binding_s4b_exception_contains",
+      "expected": "commitment amount mismatch",
+      "actual": "ABORTMSG is executed. Reason: zk proof invalid",
+      "pass": false
+    },
+    {
+      "label": "vault_withdraw_replay_s5_exception_contains",
+      "expected": "nullifier already used",
+      "actual": "ABORTMSG is executed. Reason: nullifier already used",
+      "pass": true
+    },
+    {
+      "label": "vault_no_verifier_withdraw_fail_s6_exception_contains",
+      "expected": "zk proof invalid",
+      "actual": "ABORTMSG is executed. Reason: zk proof invalid",
+      "pass": true
+    },
+    {
+      "label": "main_vault_escrow_matches_token_balance",
+      "expected": "0",
+      "actual": "0",
+      "pass": true
+    },
+    {
+      "label": "no_verifier_vault_escrow_matches_token_balance",
+      "expected": "10",
+      "actual": "10",
+      "pass": true
+    },
+    {
+      "label": "owner_gas_balance_end",
+      "expected": "> 0",
+      "actual": 30.49392179,
+      "pass": true
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "verifier_direct_onchain_validation",
+      "pass": true
+    },
+    {
+      "name": "success_path",
+      "pass": true
+    },
+    {
+      "name": "invalid_proof_rejected_keeps_state",
+      "pass": true
+    },
+    {
+      "name": "unknown_root_rejected",
+      "pass": true
+    },
+    {
+      "name": "fee_ge_amount_rejected",
+      "pass": true
+    },
+    {
+      "name": "commitment_amount_binding_enforced",
+      "pass": true
+    },
+    {
+      "name": "nullifier_replay_rejected",
+      "pass": true
+    },
+    {
+      "name": "missing_verifier_rejected",
+      "pass": true
+    }
+  ],
+  "completedAtUtc": "2026-02-27T00:09:01.587Z",
+  "success": true
+}
