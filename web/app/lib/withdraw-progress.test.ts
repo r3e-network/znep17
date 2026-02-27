@@ -10,8 +10,11 @@ import {
 describe("withdraw progress helpers", () => {
   it("provides stage-specific progress copy", () => {
     expect(getWithdrawStepCopy("fetch_merkle").progress).toContain("Merkle proof");
+    expect(getWithdrawStepCopy("fetch_merkle").expectedDuration).toContain("1s");
     expect(getWithdrawStepCopy("generate_proof").progress).toContain("Generating Groth16 proof");
+    expect(getWithdrawStepCopy("generate_proof").expectedDuration).toContain("2-20s");
     expect(getWithdrawStepCopy("submit_to_relayer").progress).toContain("Submitting withdrawal proof");
+    expect(getWithdrawStepCopy("submit_to_relayer").expectedDuration).toContain("10-15s");
   });
 
   it("formats stage-aware error messages and hints", () => {
@@ -39,7 +42,13 @@ describe("withdraw progress helpers", () => {
       "Commitment is not yet included in a finalized Merkle root. Retry shortly.",
     );
     expect(copy.message).toContain("Merkle proof lookup failed");
-    expect(copy.hint).toContain("not finalized");
+    expect(copy.hint).toContain("10-60 seconds");
+  });
+
+  it("surfaces proof rate-limit guidance for fetch-merkle failures", () => {
+    const copy = getWithdrawFailureCopy("fetch_merkle", "Too many proof requests. Retry later.");
+    expect(copy.message).toContain("Merkle proof lookup failed");
+    expect(copy.hint).toContain("rate-limiting");
   });
 
   it("marks previous steps complete while a later step is active", () => {

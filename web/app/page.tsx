@@ -66,8 +66,9 @@ const TOKEN_DEFAULT = "0xd2a4cff31913016155e38e474a2c06d08be276cf";
 const TOKEN_GAS = "0xd2a4cff31913016155e38e474a2c06d08be276cf";
 const TOKEN_NEO = "0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5";
 const RELAYER_FEE_FIXED8 = "100000000";
-const MERKLE_FINALIZATION_RETRY_ATTEMPTS = 6;
-const MERKLE_FINALIZATION_RETRY_DELAY_MS = 5000;
+const MERKLE_FINALIZATION_RETRY_ATTEMPTS = 4;
+const MERKLE_FINALIZATION_RETRY_DELAY_MS = 12000;
+const PROOF_RATE_LIMIT_RETRY_DELAY_MS = 65000;
 const LEGACY_PENDING_KEY = "znep17_has_pending";
 const LEGACY_LAST_SECRET_KEY = "znep17_last_secret";
 const LEGACY_LAST_NULLIFIER_KEY = "znep17_last_nullifier";
@@ -659,6 +660,7 @@ export default function Home() {
       currentStep = "fetch_merkle";
       setWithdrawActiveStep(currentStep);
       let merkleProof: MerkleProofResponse | null = null;
+      let waitedForProofRateLimit = false;
       for (let attempt = 0; attempt < MERKLE_FINALIZATION_RETRY_ATTEMPTS; attempt++) {
         try {
           merkleProof = await fetchMerkleProofFromRelay(noteArtifacts.commitmentHex);
@@ -666,6 +668,13 @@ export default function Home() {
         } catch (error: unknown) {
           const message = getErrorMessage(error, "Failed to fetch Merkle proof from relay").toLowerCase();
           const isFinalizationDelay = message.includes("not yet included in a finalized merkle root");
+          const isProofRateLimited = message.includes("too many proof requests");
+          if (isProofRateLimited && !waitedForProofRateLimit) {
+            waitedForProofRateLimit = true;
+            await sleep(PROOF_RATE_LIMIT_RETRY_DELAY_MS);
+            attempt -= 1;
+            continue;
+          }
           if (!isFinalizationDelay || attempt === MERKLE_FINALIZATION_RETRY_ATTEMPTS - 1) {
             throw error;
           }
@@ -1111,6 +1120,9 @@ export default function Home() {
               </button>
               {(withdrawActiveStep || withdrawFailedStep || withdrawCompleted) && (
                 <div className="mt-3 rounded-lg border border-blue-900/50 bg-blue-950/20 p-3">
+                  <p className="mb-2 text-xs text-blue-200/80">
+                    Expected normal withdrawal time: <strong>~15-30 seconds</strong> once your deposit is finalized in a Merkle root.
+                  </p>
                   <p
                     className={`text-sm ${
                       withdrawFailedStep ? "text-red-300" : withdrawCompleted ? "text-green-300" : "text-blue-300"
@@ -1151,7 +1163,12 @@ export default function Home() {
 
                       return (
                         <li key={step} className={`flex items-center justify-between rounded border px-2 py-1 text-xs ${stateClass}`}>
-                          <span>{getWithdrawStepCopy(step).label}</span>
+                          <span className="flex items-center gap-2">
+                            <span>{getWithdrawStepCopy(step).label}</span>
+                            <span className="rounded border border-gray-700/80 bg-gray-900/70 px-1.5 py-0.5 text-[10px] text-gray-300">
+                              {getWithdrawStepCopy(step).expectedDuration}
+                            </span>
+                          </span>
                           <span className="font-semibold uppercase tracking-wide">{stateLabel}</span>
                         </li>
                       );
@@ -1198,7 +1215,7 @@ export default function Home() {
                   </div>
                   <div>
                     <h3 className="mb-1 flex items-center gap-2 font-semibold text-green-300"><span className="flex h-4 w-4 items-center justify-center rounded-full bg-green-900 text-[10px] text-white">2</span> Withdraw</h3>
-                    <p className="leading-relaxed">To withdraw, your browser generates a <strong>zk-SNARK proof</strong> using your Secret and Nullifier. This proves you own a deposit in the vault without revealing <i>which</i> deposit it is. The funds are sent to a new, completely clean address.</p>
+                    <p className="leading-relaxed">To withdraw, your browser generates a <strong>zk-SNARK proof</strong> using your Secret and Nullifier (typically <strong>2-20s</strong>, depending on device). The relayer then submits the transaction (<strong>~10-15s</strong> on testnet). This proves you own a deposit without revealing <i>which</i> deposit it is, and sends funds to a fresh address.</p>
                   </div>
                 </div>
 
