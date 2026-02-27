@@ -392,15 +392,37 @@ export default function Home() {
   }, [loadRelayConfig]);
 
   useEffect(() => {
-    if (relayLoading) return;
-    if (relayer && relayIssues.length === 0) return;
-
     const timer = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        return;
+      }
       void loadRelayConfig();
     }, 30_000);
 
     return () => clearInterval(timer);
-  }, [loadRelayConfig, relayIssues.length, relayLoading, relayer]);
+  }, [loadRelayConfig]);
+
+  useEffect(() => {
+    const refreshNow = () => {
+      void loadRelayConfig();
+    };
+    const handleVisibilityChange = () => {
+      if (typeof document === "undefined") return;
+      if (document.visibilityState === "visible") {
+        refreshNow();
+      }
+    };
+
+    window.addEventListener("focus", refreshNow);
+    window.addEventListener("online", refreshNow);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", refreshNow);
+      window.removeEventListener("online", refreshNow);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [loadRelayConfig]);
 
   useEffect(() => {
     const hasPending = localStorage.getItem("znep17_has_pending");
