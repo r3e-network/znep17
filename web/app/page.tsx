@@ -5,6 +5,7 @@ import { Wallet, ArrowRight, Shield, Activity, X, RefreshCw, Copy, Check, Info, 
 import { wallet } from "@cityofzion/neon-js";
 import { poseidon1Bls, poseidon4Bls } from "./lib/blsPoseidon";
 import { summarizeRelayConfigFailure } from "./lib/relay-config";
+import { getWalletConnectErrorMessage } from "./lib/wallet-errors";
 import {
   WITHDRAW_STEP_SEQUENCE,
   getWithdrawFailureCopy,
@@ -61,6 +62,8 @@ declare global {
 }
 
 const TOKEN_DEFAULT = "0xd2a4cff31913016155e38e474a2c06d08be276cf";
+const TOKEN_GAS = "0xd2a4cff31913016155e38e474a2c06d08be276cf";
+const TOKEN_NEO = "0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5";
 const RELAYER_FEE_FIXED8 = "100000000";
 const HASH160_HEX_RE = /^(?:0x)?[0-9a-fA-F]{40}$/;
 const HEX_32_RE = /^[0-9a-fA-F]{64}$/;
@@ -191,6 +194,11 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function isSupportedTokenHash(input: string): boolean {
+  const normalized = input.trim().toLowerCase();
+  return normalized === TOKEN_GAS || normalized === TOKEN_NEO;
+}
+
 type MerkleProofResponse = {
   leafIndex: number;
   root: string;
@@ -294,13 +302,20 @@ export default function Home() {
   const handleTicketInput = (val: string) => {
     const parts = val.replace('znep17-', '').split('-');
     if (parts.length === 4) {
+      const candidateToken = parts[3].trim().toLowerCase();
+      if (!isSupportedTokenHash(candidateToken)) {
+        setError("Privacy Ticket asset is not supported by this app. Please use GAS or NEO.");
+        return;
+      }
+      setError("");
       setSecretHex(parts[0]);
       setNullifierPrivHex(parts[1]);
       setTicketAmount(parts[2]);
-      setTicketAsset(parts[3]);
+      setTicketAsset(candidateToken);
       setAmount(parts[2]); // Default withdraw amount to full amount
-      setTokenHash(parts[3]);
+      setTokenHash(candidateToken);
     } else if (parts.length === 2) {
+      setError("");
       setSecretHex(parts[0]);
       setNullifierPrivHex(parts[1]);
     } else {
@@ -398,7 +413,16 @@ export default function Home() {
        if (lsSecret) setSecretHex(lsSecret);
        if (lsNullifier) setNullifierPrivHex(lsNullifier);
        if (lsAmount) { setAmount(lsAmount); setTicketAmount(lsAmount); }
-       if (lsToken) { setTokenHash(lsToken); setTicketAsset(lsToken); }
+       if (lsToken) {
+         const normalizedStoredToken = lsToken.trim().toLowerCase();
+         if (isSupportedTokenHash(normalizedStoredToken)) {
+           setTokenHash(normalizedStoredToken);
+           setTicketAsset(normalizedStoredToken);
+         } else {
+           setTokenHash(TOKEN_DEFAULT);
+           setTicketAsset(TOKEN_DEFAULT);
+         }
+       }
     }
   }, []);
 
@@ -414,7 +438,7 @@ export default function Home() {
       if (!recipient) setRecipient(accountData.address);
       setError("");
     } catch (err: unknown) {
-      setError(getErrorMessage(err, "Failed to connect wallet"));
+      setError(getWalletConnectErrorMessage(err, networkMagic, "Failed to connect wallet"));
     }
   };
 
@@ -441,6 +465,9 @@ export default function Home() {
       }
 
       const neoline = new window.NEOLineN3.Init();
+      if (!isSupportedTokenHash(tokenHash)) {
+        throw new Error("Selected asset is not supported by this app. Please choose GAS or NEO.");
+      }
       const senderScriptHash = wallet.getScriptHashFromAddress(account.address);
       const assetScriptHash = normalizeHash160(tokenHash, "Token script hash");
       const vaultScriptHash = normalizeHash160(vaultHash, "Vault contract hash");
@@ -479,7 +506,14 @@ export default function Home() {
       setTxHash(result.txid);
       await loadRelayConfig();
     } catch (err: unknown) {
-      setError(getErrorMessage(err, "Deposit failed"));
+      const message = getErrorMessage(err, "Deposit failed");
+      if (message.toLowerCase().includes("asset not allowed")) {
+        setError(
+          `Selected asset is not allowed by this vault on the connected network. Re-select GAS/NEO and confirm wallet network matches relayer network (${networkMagic ?? "unknown"}).`,
+        );
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -508,6 +542,9 @@ export default function Home() {
     setWithdrawActiveStep(currentStep);
 
     try {
+      if (!isSupportedTokenHash(tokenHash)) {
+        throw new Error("Selected asset is not supported by this app. Please choose GAS or NEO.");
+      }
       const assetScriptHash = normalizeHash160(tokenHash, "Token script hash");
       const recipientScriptHash = toHash160(recipient, "Recipient");
       const relayerScriptHash = toHash160(relayer, "Relayer");
@@ -813,24 +850,25 @@ export default function Home() {
                 <label className="block text-sm font-medium text-gray-400 mb-2">Select Asset</label>
                 <div className="flex gap-4">
                   <button
-                    onClick={() => setTokenHash("0xd2a4cff31913016155e38e474a2c06d08be276cf")}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all ${tokenHash === "0xd2a4cff31913016155e38e474a2c06d08be276cf" ? "border-green-500 bg-green-500/10 text-green-400" : "border-gray-700 hover:border-gray-600 bg-gray-800 text-gray-400"}`}
+                    onClick={() => setTokenHash(TOKEN_GAS)}
+                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all ${tokenHash === TOKEN_GAS ? "border-green-500 bg-green-500/10 text-green-400" : "border-gray-700 hover:border-gray-600 bg-gray-800 text-gray-400"}`}
                   >
-                    <svg width="24" height="24" viewBox="0 0 220 220" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-green-500">
-  <path d="M109.846 0C49.1846 0 0 49.1846 0 109.846C0 170.508 49.1846 220 109.846 220C170.508 220 220 170.508 220 109.846C220 49.1846 170.508 0 109.846 0ZM109.846 205.538C57.0615 205.538 14.4615 162.938 14.4615 110.154C14.4615 57.3692 57.0615 14.7692 109.846 14.7692C162.631 14.7692 205.231 57.3692 205.231 110.154C205.231 162.938 162.631 205.538 109.846 205.538Z" fill="currentColor"/>
-  <path d="M165.846 80.6769L115.8 45.4154L55.7538 135.046L105.8 170.308L165.846 80.6769ZM64.6769 133.569L117.277 55.0769L156.923 83.0462L104.323 161.538L64.6769 133.569Z" fill="currentColor"/>
-  <path d="M110.154 52.8L121.154 60.1846L86.5846 111.877L75.5846 104.492L110.154 52.8Z" fill="currentColor"/>
-  <path d="M136.246 70.2154L147.246 77.6L112.677 129.292L101.677 121.908L136.246 70.2154Z" fill="currentColor"/>
-</svg>
+                    <img
+                      src="/tokens/gas.svg"
+                      alt="GAS logo"
+                      className="h-6 w-6"
+                    />
                     <span className="font-semibold tracking-wide">GAS</span>
                   </button>
                   <button
-                    onClick={() => setTokenHash("0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5")}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all ${tokenHash === "0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5" ? "border-green-500 bg-green-500/10 text-green-400" : "border-gray-700 hover:border-gray-600 bg-gray-800 text-gray-400"}`}
+                    onClick={() => setTokenHash(TOKEN_NEO)}
+                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all ${tokenHash === TOKEN_NEO ? "border-green-500 bg-green-500/10 text-green-400" : "border-gray-700 hover:border-gray-600 bg-gray-800 text-gray-400"}`}
                   >
-                    <svg width="24" height="24" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-green-500">
-  <path d="M127.9 0L18.5 56.9L0 220.1L127.9 256L256 220.1L237.5 56.9L127.9 0ZM185 102.6V209.5L124.7 172.9L71.5 103V209.5L36.6 199.9V90.5L96.9 127L150.5 197V90.5L185 102.6Z" fill="currentColor"/>
-</svg>
+                    <img
+                      src="/tokens/neo.svg"
+                      alt="NEO logo"
+                      className="h-6 w-6"
+                    />
                     <span className="font-semibold tracking-wide">NEO</span>
                   </button>
                 </div>
@@ -859,14 +897,12 @@ export default function Home() {
                 />
               </div>
 
-              {(!secretHex || !nullifierPrivHex) && (
-                 <button
-                   onClick={generateRandomParams}
-                   className="mb-4 w-full rounded-lg border border-green-500/30 bg-green-500/10 py-3 text-sm font-medium text-green-400 transition-colors hover:bg-green-500/20"
-                 >
-                   Generate Privacy Ticket (Required)
-                 </button>
-              )}
+              <button
+                onClick={generateRandomParams}
+                className="mb-4 w-full rounded-lg border border-green-500/30 bg-green-500/10 py-3 text-sm font-medium text-green-400 transition-colors hover:bg-green-500/20"
+              >
+                {secretHex && nullifierPrivHex ? "Refresh Privacy Ticket" : "Generate Privacy Ticket (Required)"}
+              </button>
 
               {secretHex && (
                 <div className="mb-4 rounded-lg border border-yellow-700/50 bg-yellow-900/30 p-4 text-yellow-500">
