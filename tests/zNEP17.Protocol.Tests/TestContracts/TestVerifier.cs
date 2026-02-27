@@ -72,4 +72,36 @@ public class TestVerifier : SmartContract
 
         return true;
     }
+
+
+    [Safe]
+    public static bool VerifyTreeUpdate(
+        byte[] proof,
+        byte[] publicInputs,
+        byte[] oldRoot,
+        byte[] newRoot,
+        byte[] oldLeaf,
+        byte[] newLeaf,
+        BigInteger leafIndex)
+    {
+        if (!GetResult())
+            return false;
+
+        if (proof is null || proof.Length == 0 || proof[0] != 0x01)
+            return false;
+        if (publicInputs is null || publicInputs.Length == 0)
+            return false;
+        if (oldRoot is null || oldRoot.Length != 32)
+            return false;
+        if (newRoot is null || newRoot.Length != 32)
+            return false;
+        if (oldLeaf is null || oldLeaf.Length != 32)
+            return false;
+        if (newLeaf is null || newLeaf.Length != 32)
+            return false;
+        if (leafIndex < 0)
+            return false;
+
+        return true;
+    }
 }

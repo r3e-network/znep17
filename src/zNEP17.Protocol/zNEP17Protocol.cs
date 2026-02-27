@@ -14,6 +14,7 @@ namespace zNEP17.Protocol;
 [SupportedStandards("zNEP-17")]
 [ContractPermission(Permission.Any, "transfer")]
 [ContractPermission(Permission.Any, "verify")]
+[ContractPermission(Permission.Any, "verifyTreeUpdate")]
 public class zNEP17Protocol : SmartContract
 {
     public delegate void PrivacyDepositDelegate(UInt160 asset, UInt160 stealthAddress, BigInteger amount, byte[] leaf, BigInteger index);
@@ -62,8 +63,7 @@ public class zNEP17Protocol : SmartContract
     private static readonly byte[] KeyPendingRelayer = new byte[] { 0x19 };
     private static readonly byte[] KeyPendingRelayerReadyAt = new byte[] { 0x1A };
     private static readonly byte[] KeySecurityCouncil = new byte[] { 0x1B };
-    private static readonly byte[] KeyTreeMaintainer = new byte[] { 0x1C };
-    private static readonly byte[] KeyPendingSecurityCouncil = new byte[] { 0x1E };
+        private static readonly byte[] KeyPendingSecurityCouncil = new byte[] { 0x1E };
     private static readonly byte[] KeyPendingSecurityCouncilReadyAt = new byte[] { 0x1F };
     private static readonly byte[] KeyLastRootLeafCount = new byte[] { 0x20 };
 
@@ -148,12 +148,7 @@ public class zNEP17Protocol : SmartContract
         return council is null ? UInt160.Zero : (UInt160)(byte[])council;
     }
 
-    [Safe]
-    public static UInt160 GetTreeMaintainer()
-    {
-        ByteString? maintainer = Storage.Get(KeyTreeMaintainer);
-        return maintainer is null ? UInt160.Zero : (UInt160)(byte[])maintainer;
-    }
+
 
     [Safe]
     public static UInt160 GetPendingSecurityCouncil()
@@ -438,41 +433,58 @@ public class zNEP17Protocol : SmartContract
             map.Delete(key);
     }
 
-    public static void SetTreeMaintainer(UInt160 maintainer)
-    {
-        ExecutionEngine.Assert(maintainer.IsValidAndNotZero, "invalid tree maintainer address");
-        AssertOwnerWitness();
-        Storage.Put(KeyTreeMaintainer, (byte[])maintainer);
-    }
 
-    public static void UpdateMerkleRoot(byte[] newRoot, BigInteger expectedLeafCount)
+
+    public static void UpdateMerkleRoot(byte[] proof, byte[] publicInputs, byte[] newRoot)
     {
         int rootLength = newRoot is null ? 0 : newRoot.Length;
         ExecutionEngine.Assert(rootLength == PrivacyGuards.MerkleRootLength, "invalid root length");
         ExecutionEngine.Assert(newRoot is not null, "root cannot be null");
-        ExecutionEngine.Assert(expectedLeafCount >= 0, "invalid expected leaf count");
+        ExecutionEngine.Assert(proof is not null && proof.Length == 192, "invalid proof");
+        ExecutionEngine.Assert(publicInputs is not null && publicInputs.Length == 160, "invalid public inputs");
 
-        UInt160 maintainer = GetTreeMaintainer();
-        ExecutionEngine.Assert(maintainer.IsValidAndNotZero, "tree maintainer not configured");
-        ExecutionEngine.Assert(Runtime.CheckWitness(maintainer), "forbidden tree maintainer");
-
-        BigInteger leafCount = GetLeafIndex();
-        ExecutionEngine.Assert(expectedLeafCount == leafCount, "leaf count changed");
         BigInteger lastRootLeafCount = GetLastRootLeafCount();
-        ExecutionEngine.Assert(leafCount >= lastRootLeafCount, "leaf count regression");
-        ExecutionEngine.Assert(
-            leafCount > lastRootLeafCount || GetCurrentRoot().Length == 0,
-            "root already updated for current leaf count");
+        BigInteger leafCount = GetLeafIndex();
+        ExecutionEngine.Assert(lastRootLeafCount < leafCount, "no new leaves to update");
+
+        byte[] oldRoot = GetCurrentRoot();
+        if (oldRoot.Length == 0)
+        {
+            oldRoot = (byte[])new byte[] { 0x50, 0x0d, 0x7e, 0xda, 0xc2, 0x49, 0x35, 0xfb, 0x57, 0x38, 0x44, 0x1c, 0x8f, 0x37, 0x78, 0xbc, 0xb7, 0x14, 0x49, 0xc5, 0x52, 0xc7, 0x56, 0x38, 0x3d, 0xc9, 0x86, 0xdc, 0x49, 0x9d, 0x63, 0x22 };
+        }
+
+        BigInteger updateIndex = lastRootLeafCount; // The index of the leaf being updated (0-based)
+        byte[] oldLeaf = new byte[32]; // 0n
+        byte[] newLeaf = GetLeaf(updateIndex);
+        
+        UInt160 verifier = GetVerifier();
+        ExecutionEngine.Assert(verifier.IsValidAndNotZero, "verifier not configured");
+
+        bool result = (bool)Contract.Call(
+            verifier,
+            "verifyTreeUpdate",
+            CallFlags.ReadOnly,
+            proof,
+            publicInputs,
+            oldRoot,
+            newRoot,
+            oldLeaf,
+            newLeaf,
+            updateIndex);
+
+        ExecutionEngine.Assert(result, "invalid tree update proof");
+        
         ExecutionEngine.Assert(RootMap().Get(newRoot!) is null, "root already known");
 
         Storage.Put(KeyCurrentRoot, newRoot!);
         RootMap().Put(newRoot!, true);
-        RootLeafCountMap().Put(newRoot!, leafCount);
-        Storage.Put(KeyLastRootLeafCount, leafCount);
-        RootHistoryMap().Put(leafCount.ToByteArray(), newRoot!);
-        PruneOldRootHistory(leafCount);
+        BigInteger newRootLeafCount = updateIndex + 1;
+        RootLeafCountMap().Put(newRoot!, newRootLeafCount);
+        Storage.Put(KeyLastRootLeafCount, newRootLeafCount);
+        RootHistoryMap().Put(newRootLeafCount.ToByteArray(), newRoot!);
+        PruneOldRootHistory(newRootLeafCount);
 
-        OnMerkleRootUpdated(newRoot!, leafCount);
+        OnMerkleRootUpdated(newRoot!, newRootLeafCount);
     }
 
     [NoReentrant]

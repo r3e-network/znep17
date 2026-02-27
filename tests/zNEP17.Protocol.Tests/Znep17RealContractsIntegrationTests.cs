@@ -44,7 +44,7 @@ public class Znep17RealContractsIntegrationTests
         vault.Verifier = verifier.Hash;
         vault.Relayer = relayer.Account;
         vault.SetAssetAllowed(token.Hash, true);
-        vault.TreeMaintainer = owner.Account;
+
 
         engine.SetTransactionSigners(depositor);
         byte[] leaf = NewFixedBytes(0x51);
@@ -107,11 +107,11 @@ public class Znep17RealContractsIntegrationTests
         token.MintForTesting(depositor.Account, 100);
 
         engine.SetTransactionSigners(owner);
-        verifier.Result = false;
+        verifier.Result = true;
         vault.Verifier = verifier.Hash;
         vault.Relayer = owner.Account;
         vault.SetAssetAllowed(token.Hash, true);
-        vault.TreeMaintainer = owner.Account;
+
 
         engine.SetTransactionSigners(depositor);
         byte[] leaf = NewFixedBytes(0x61);
@@ -122,6 +122,8 @@ public class Znep17RealContractsIntegrationTests
             new object[] { stealth, leaf });
 
         byte[] root = PublishRoot(engine, vault, owner, 0x62);
+        engine.SetTransactionSigners(owner);
+        verifier.Result = false;
         byte[] nullifier = NewFixedBytes(0x62);
 
         engine.SetTransactionSigners(owner);
@@ -174,7 +176,7 @@ public class Znep17RealContractsIntegrationTests
         vault.Verifier = verifier.Hash;
         vault.Relayer = owner.Account;
         vault.SetAssetAllowed(token.Hash, true);
-        vault.TreeMaintainer = owner.Account;
+
 
         engine.SetTransactionSigners(depositor);
         byte[] leaf = NewFixedBytes(0x71);
@@ -237,7 +239,7 @@ public class Znep17RealContractsIntegrationTests
         vault.Verifier = verifier.Hash;
         vault.Relayer = owner.Account;
         vault.SetAssetAllowed(token.Hash, true);
-        vault.TreeMaintainer = owner.Account;
+
 
         engine.SetTransactionSigners(depositor);
         byte[] leaf = NewFixedBytes(0x81);
@@ -292,18 +294,11 @@ public class Znep17RealContractsIntegrationTests
         engine.SetTransactionSigners(owner);
         vault.Relayer = owner.Account;
         vault.SetAssetAllowed(token.Hash, true);
-        vault.TreeMaintainer = owner.Account;
+
 
         engine.SetTransactionSigners(depositor);
-        byte[] leaf = NewFixedBytes(0x91);
-        token.Transfer(
-            depositor.Account,
-            vault.Hash,
-            10,
-            new object[] { stealth, leaf });
-
-        byte[] root = PublishRoot(engine, vault, owner, 0x92);
         byte[] nullifier = NewFixedBytes(0x92);
+        byte[] root = NewFixedBytes(0x92);
 
         engine.SetTransactionSigners(owner);
         Assert.Throws<TestException>(() =>
@@ -319,10 +314,11 @@ public class Znep17RealContractsIntegrationTests
                 10,
                 1));
 
-        Assert.Equal(new BigInteger(10), RequireBigInteger(token.BalanceOf(vault.Hash)));
+        Assert.Equal(new BigInteger(0), RequireBigInteger(token.BalanceOf(vault.Hash)));
         Assert.False(RequireBool(vault.IsNullifierUsed(nullifier)));
     }
 
+    private static byte[] NewProof() { var p = new byte[192]; p[0] = 1; return p; }
     private static byte[] NewFixedBytes(byte b)
     {
         var value = new byte[32];
@@ -353,7 +349,7 @@ public class Znep17RealContractsIntegrationTests
         byte[] root = NewFixedBytes(rootSeed);
         engine.SetTransactionSigners(owner);
         BigInteger leafCount = RequireBigInteger(vault.LeafIndex);
-        vault.UpdateMerkleRoot(root, leafCount);
+        vault.UpdateMerkleRoot(NewProof(), new byte[160], root);
         return root;
     }
 

@@ -34,6 +34,16 @@ public class Znep17IntegrationTests
             UInt160? relayer,
             BigInteger? amount,
             BigInteger? fee);
+
+        [DisplayName("verifyTreeUpdate")]
+        public abstract bool? VerifyTreeUpdate(
+            byte[]? proof,
+            byte[]? publicInputs,
+            byte[]? oldRoot,
+            byte[]? newRoot,
+            byte[]? oldLeaf,
+            byte[]? newLeaf,
+            BigInteger? leafIndex);
     }
 
     [Fact]
@@ -71,7 +81,7 @@ public class Znep17IntegrationTests
         vault.Verifier = verifier.Hash;
         vault.Relayer = relayer.Account;
         vault.SetAssetAllowed(asset.Hash, true);
-        vault.TreeMaintainer = owner.Account;
+
 
         byte[] leaf = NewFixedBytes(0x11);
         engine.SetTransactionSigners(depositor);
@@ -153,7 +163,7 @@ public class Znep17IntegrationTests
         vault.Verifier = verifier.Hash;
         vault.Relayer = owner.Account;
         vault.SetAssetAllowed(asset.Hash, true);
-        vault.TreeMaintainer = owner.Account;
+
 
         engine.SetTransactionSigners(depositor);
         byte[] leaf = NewFixedBytes(0x33);
@@ -220,7 +230,7 @@ public class Znep17IntegrationTests
         vault.Verifier = verifier.Hash;
         vault.Relayer = relayer.Account;
         vault.SetAssetAllowed(asset.Hash, true);
-        vault.TreeMaintainer = owner.Account;
+
 
         byte[] commitment = NewFixedBytes(0x71);
         engine.SetTransactionSigners(depositor);
@@ -294,7 +304,7 @@ public class Znep17IntegrationTests
         vault.Verifier = verifier.Hash;
         vault.Relayer = configuredRelayer.Account;
         vault.SetAssetAllowed(asset.Hash, true);
-        vault.TreeMaintainer = owner.Account;
+
 
         byte[] commitment = NewFixedBytes(0x81);
         engine.SetTransactionSigners(depositor);
@@ -324,20 +334,7 @@ public class Znep17IntegrationTests
         TestEngine engine,
         Func<byte[]?, bool> verifyRule)
     {
-        ContractManifest manifest = BuildSingleMethodManifest(
-            "verify",
-            ContractParameterType.Boolean,
-            safe: true,
-            ("asset", ContractParameterType.Hash160),
-            ("proof", ContractParameterType.ByteArray),
-            ("publicInputs", ContractParameterType.ByteArray),
-            ("merkleRoot", ContractParameterType.ByteArray),
-            ("nullifierHash", ContractParameterType.ByteArray),
-            ("commitment", ContractParameterType.ByteArray),
-            ("recipient", ContractParameterType.Hash160),
-            ("relayer", ContractParameterType.Hash160),
-            ("amount", ContractParameterType.Integer),
-            ("fee", ContractParameterType.Integer));
+        ContractManifest manifest = BuildVerifierManifest();
 
         return engine.Deploy<MockVerifierContract>(
             Neo.SmartContract.Testing.zNEP17Protocol.Nef,
@@ -359,14 +356,20 @@ public class Znep17IntegrationTests
                     ))
                     .Returns<UInt160?, byte[]?, byte[]?, byte[]?, byte[]?, byte[]?, UInt160?, UInt160?, BigInteger?, BigInteger?>(
                         (_, proof, _, _, _, _, _, _, _, _)  => verifyRule(proof));
+                mock.Setup(m => m.VerifyTreeUpdate(
+                        It.IsAny<byte[]?>(),
+                        It.IsAny<byte[]?>(),
+                        It.IsAny<byte[]?>(),
+                        It.IsAny<byte[]?>(),
+                        It.IsAny<byte[]?>(),
+                        It.IsAny<byte[]?>(),
+                        It.IsAny<BigInteger?>()
+                    ))
+                    .Returns(true);
             });
     }
 
-    private static ContractManifest BuildSingleMethodManifest(
-        string methodName,
-        ContractParameterType returnType,
-        bool safe,
-        params (string Name, ContractParameterType Type)[] parameters)
+        private static ContractManifest BuildVerifierManifest()
     {
         ContractManifest manifest = ContractManifest.Parse(Neo.SmartContract.Testing.zNEP17Protocol.Manifest.ToJson().ToString());
         manifest.Abi.Events = Array.Empty<ContractEventDescriptor>();
@@ -374,18 +377,45 @@ public class Znep17IntegrationTests
         [
             new ContractMethodDescriptor
             {
-                Name = methodName,
-                Safe = safe,
-                ReturnType = returnType,
-                Parameters = parameters
-                    .Select(p => new ContractParameterDefinition { Name = p.Name, Type = p.Type })
-                    .ToArray()
+                Name = "verify",
+                Safe = true,
+                ReturnType = ContractParameterType.Boolean,
+                Parameters = new[]
+                {
+                    new ContractParameterDefinition { Name = "asset", Type = ContractParameterType.Hash160 },
+                    new ContractParameterDefinition { Name = "proof", Type = ContractParameterType.ByteArray },
+                    new ContractParameterDefinition { Name = "publicInputs", Type = ContractParameterType.ByteArray },
+                    new ContractParameterDefinition { Name = "merkleRoot", Type = ContractParameterType.ByteArray },
+                    new ContractParameterDefinition { Name = "nullifierHash", Type = ContractParameterType.ByteArray },
+                    new ContractParameterDefinition { Name = "commitment", Type = ContractParameterType.ByteArray },
+                    new ContractParameterDefinition { Name = "recipient", Type = ContractParameterType.Hash160 },
+                    new ContractParameterDefinition { Name = "relayer", Type = ContractParameterType.Hash160 },
+                    new ContractParameterDefinition { Name = "amount", Type = ContractParameterType.Integer },
+                    new ContractParameterDefinition { Name = "fee", Type = ContractParameterType.Integer }
+                }
+            },
+            new ContractMethodDescriptor
+            {
+                Name = "verifyTreeUpdate",
+                Safe = true,
+                ReturnType = ContractParameterType.Boolean,
+                Parameters = new[]
+                {
+                    new ContractParameterDefinition { Name = "proof", Type = ContractParameterType.ByteArray },
+                    new ContractParameterDefinition { Name = "publicInputs", Type = ContractParameterType.ByteArray },
+                    new ContractParameterDefinition { Name = "oldRoot", Type = ContractParameterType.ByteArray },
+                    new ContractParameterDefinition { Name = "newRoot", Type = ContractParameterType.ByteArray },
+                    new ContractParameterDefinition { Name = "oldLeaf", Type = ContractParameterType.ByteArray },
+                    new ContractParameterDefinition { Name = "newLeaf", Type = ContractParameterType.ByteArray },
+                    new ContractParameterDefinition { Name = "leafIndex", Type = ContractParameterType.Integer }
+                }
             }
         ];
-        manifest.Name = $"zNEP17.{methodName}.mock.{Interlocked.Increment(ref _mockContractSequence)}";
+        manifest.Name = $"zNEP17.Verifier.mock.{Interlocked.Increment(ref _mockContractSequence)}";
         return manifest;
     }
 
+    private static byte[] NewProof() { var p = new byte[192]; p[0] = 1; return p; }
     private static byte[] NewFixedBytes(byte b)
     {
         var value = new byte[32];
@@ -416,7 +446,7 @@ public class Znep17IntegrationTests
         byte[] root = NewFixedBytes(rootSeed);
         engine.SetTransactionSigners(owner);
         BigInteger leafCount = RequireBigInteger(vault.LeafIndex);
-        vault.UpdateMerkleRoot(root, leafCount);
+        vault.UpdateMerkleRoot(NewProof(), new byte[160], root);
         return root;
     }
 
