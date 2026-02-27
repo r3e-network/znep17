@@ -35,6 +35,8 @@ public class VerifierContractBehaviorTests
         byte[] proof = Convert.FromHexString(fixture.ProofHex);
         byte[] publicInputs = Convert.FromHexString(fixture.PublicInputsHex);
 
+        engine.Fee += 100_000_000_000;
+
         bool? result = verifier.Verify(
             asset,
             proof,

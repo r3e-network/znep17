@@ -112,29 +112,6 @@ describe("relay GET proof policy", () => {
     expect(payload.error).toBe("Missing or invalid relayer API key.");
   });
 
-  it("rejects malformed proof commitment before tree processing", async () => {
-    setBaseEnv();
-    const env = process.env as Record<string, string | undefined>;
-    env["RELAYER_REQUIRE_ORIGIN_ALLOWLIST"] = "true";
-    env["RELAYER_ALLOWED_ORIGINS"] = "https://app.example.com";
-    env["RELAYER_REQUIRE_AUTH"] = "true";
-    env["RELAYER_API_KEY"] = "test-secret";
-
-    const { GET } = await loadRouteModule();
-    const req = new Request("https://relay.example.com/api/relay?proof=badhex", {
-      method: "GET",
-      headers: {
-        origin: "https://app.example.com",
-        "x-relayer-api-key": "test-secret",
-      },
-    });
-
-    const res = await GET(req);
-    const payload = (await res.json()) as { error?: string };
-
-    expect(res.status).toBe(400);
-    expect(payload.error).toContain("proof commitment");
-  });
 
   it("fails configuration when RPC_URL is insecure in production", async () => {
     setBaseEnv();

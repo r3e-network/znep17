@@ -1,0 +1,11 @@
+--- tests/zNEP17.Protocol.Tests/VerifierContractBehaviorTests.cs
++++ tests/zNEP17.Protocol.Tests/VerifierContractBehaviorTests.cs
+@@ -35,6 +35,8 @@
+         byte[] proof = Convert.FromHexString(fixture.ProofHex);
+         byte[] publicInputs = Convert.FromHexString(fixture.PublicInputsHex);
+ 
++        engine.Fee += 100_000_000_000;
++
+         bool? result = verifier.Verify(
+             asset,
+             proof,

@@ -8,7 +8,7 @@ using System.ComponentModel;
 
 namespace zNEP17.Protocol;
 
-[ManifestExtra("Author", "Neo Community")]
+[ManifestExtra("Author", "R3E Network")]
 [ManifestExtra("Description", "zNEP-17 privacy vault for Neo N3 with zk-SNARK based private transfers.")]
 [ManifestExtra("Version", "0.1.0")]
 [SupportedStandards("zNEP-17")]

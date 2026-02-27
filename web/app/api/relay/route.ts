@@ -1067,7 +1067,6 @@ export async function POST(req: Request) {
     let tokenScriptHash: string;
     let recipientScriptHash: string;
     let nullifierHashHex: string;
-    let commitmentHex: string;
     let newCommitmentHex: string;
     let merkleRootHex: string;
     let amount: bigint;
@@ -1092,7 +1091,6 @@ export async function POST(req: Request) {
 
       merkleRootHex = normalizeHex32(body.merkleRoot, "merkleRoot");
       nullifierHashHex = normalizeHex32(body.nullifierHash, "nullifierHash");
-      commitmentHex = normalizeHex32(body.commitment, "commitment");
       newCommitmentHex = normalizeHex32(body.newCommitment, "newCommitment");
       amount = parseIntString(body.amount, "amount");
       fee = parseIntString(body.fee, "fee");
@@ -1143,15 +1141,15 @@ export async function POST(req: Request) {
     const [knownRoot, usedNullifier, commitmentIndex] = await Promise.all([
       isKnownRootOnChain(vaultScriptHash, merkleRootHex),
       isNullifierUsedOnChain(vaultScriptHash, nullifierHashHex),
-      getCommitmentIndexOnChain(vaultScriptHash, commitmentHex),
+      getCommitmentIndexOnChain(vaultScriptHash, newCommitmentHex),
     ]);
     if (!knownRoot) {
       await unlockNullifier();
       return NextResponse.json({ error: "Unknown merkle root." }, { status: 400 });
     }
-    if (commitmentIndex < 0) {
+    if (commitmentIndex >= 0) {
       await unlockNullifier();
-      return NextResponse.json({ error: "Commitment not found in vault tree." }, { status: 400 });
+      return NextResponse.json({ error: "New commitment already exists in vault tree." }, { status: 409 });
     }
     if (usedNullifier) {
       await unlockNullifier();

@@ -7,7 +7,7 @@ using System.Numerics;
 
 namespace zNEP17.Verifier;
 
-[ManifestExtra("Author", "Neo Community")]
+[ManifestExtra("Author", "R3E Network")]
 [ManifestExtra("Description", "zNEP-17 production Groth16 verifier over BLS12-381 on Neo N3.")]
 [ManifestExtra("Version", "1.0.0")]
 [DisplayName("zNEP17Groth16Verifier")]
