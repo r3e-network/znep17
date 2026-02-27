@@ -605,6 +605,28 @@ async function fetchLeafIndexOnChain(vaultScriptHash: string): Promise<number> {
   return 0;
 }
 
+async function fetchLastRootLeafCountOnChain(vaultScriptHash: string): Promise<number> {
+  const client = new rpc.RPCClient(RPC_URL);
+  let result;
+  try {
+    result = await client.invokeFunction(`0x${vaultScriptHash}`, "getLastRootLeafCount", []);
+  } catch {
+    result = await client.invokeFunction(`0x${vaultScriptHash}`, "GetLastRootLeafCount", []);
+  }
+  if (result.state === "FAULT") {
+    throw new Error(`getLastRootLeafCount failed: ${result.exception || "unknown"}`);
+  }
+  const item = result.stack?.[0] as RpcStackItem | undefined;
+  if (!item || !item.value) return 0;
+  if (item.type === "Integer") return Number(item.value);
+  if (item.type === "ByteString" || item.type === "ByteArray" || item.type === "Buffer") {
+    const hex = Buffer.from(String(item.value), "base64").toString("hex");
+    if (hex.length === 0) return 0;
+    return Number(BigInt(`0x${hex}`));
+  }
+  return 0;
+}
+
 async function fetchLeafOnChain(vaultScriptHash: string, index: number): Promise<string> {
   const client = new rpc.RPCClient(RPC_URL);
   let result;
@@ -792,13 +814,15 @@ function appendLeafToMerkleTree(tree: { leaves: bigint[]; layers: bigint[][]; ro
   tree.leafCount += 1;
 }
 
-async function getOrBuildMerkleTree(vaultScriptHash: string): Promise<{
+async function getOrBuildMerkleTree(vaultScriptHash: string, targetLeafCount?: number): Promise<{
   leaves: bigint[];
   layers: bigint[][];
   root: bigint;
   leafCount: number;
 }> {
-  const leafCount = await fetchLeafIndexOnChain(vaultScriptHash);
+  const leafCount = typeof targetLeafCount === "number"
+    ? targetLeafCount
+    : await fetchLeafIndexOnChain(vaultScriptHash);
   if (leafCount > RELAYER_MERKLE_MAX_BOOTSTRAP_LEAVES) {
     throw new Error(
       `Merkle tree size exceeds configured limit (${leafCount} > ${RELAYER_MERKLE_MAX_BOOTSTRAP_LEAVES}).`,
@@ -948,7 +972,24 @@ export async function GET(req: Request) {
           { status: 404, headers: { "Cache-Control": "no-store" } },
         );
       }
-      const tree = await getOrBuildMerkleTree(vaultScriptHash);
+      const [leafCount, lastRootLeafCount] = await Promise.all([
+        fetchLeafIndexOnChain(vaultScriptHash),
+        fetchLastRootLeafCountOnChain(vaultScriptHash),
+      ]);
+      if (lastRootLeafCount > leafCount) {
+        return NextResponse.json(
+          { error: "Invalid vault state: finalized root leaf count exceeds total leaves." },
+          { status: 503, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+      if (commitmentIndex >= lastRootLeafCount) {
+        return NextResponse.json(
+          { error: "Commitment is not yet included in a finalized Merkle root. Retry shortly." },
+          { status: 409, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      const tree = await getOrBuildMerkleTree(vaultScriptHash, lastRootLeafCount);
       if (commitmentIndex >= tree.leafCount) {
         return NextResponse.json(
           { error: "Commitment index exceeds current tree size." },
@@ -959,7 +1000,7 @@ export async function GET(req: Request) {
       const treeLeaf = tree.layers[0][commitmentIndex] ?? 0n;
       if (treeLeaf !== target) {
         cachedMerkleTree = null;
-        const rebuilt = await getOrBuildMerkleTree(vaultScriptHash);
+        const rebuilt = await getOrBuildMerkleTree(vaultScriptHash, lastRootLeafCount);
         const rebuiltLeaf = rebuilt.layers[0][commitmentIndex] ?? 0n;
         if (rebuiltLeaf !== target) {
           return NextResponse.json(

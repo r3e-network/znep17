@@ -63,6 +63,15 @@ export function getWithdrawFailureCopy(
       hint: "Relayer blocked this website origin. Add your site origin to RELAYER_ALLOWED_ORIGINS (and MAINTAINER_ALLOWED_ORIGINS), then retry.",
     };
   }
+  if (
+    step === "fetch_merkle" &&
+    normalizedReasonLower.includes("not yet included in a finalized merkle root")
+  ) {
+    return {
+      message: `${stepCopy.errorPrefix}: ${normalizedReason}`,
+      hint: "Your deposit is confirmed but not finalized for withdrawal yet. Wait for maintainer root update, then retry.",
+    };
+  }
   return {
     message: `${stepCopy.errorPrefix}: ${normalizedReason}`,
     hint: stepCopy.hint,

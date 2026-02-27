@@ -33,6 +33,15 @@ describe("withdraw progress helpers", () => {
     expect(copy.hint).toContain("RELAYER_ALLOWED_ORIGINS");
   });
 
+  it("surfaces root-finalization guidance for fetch-merkle failures", () => {
+    const copy = getWithdrawFailureCopy(
+      "fetch_merkle",
+      "Commitment is not yet included in a finalized Merkle root. Retry shortly.",
+    );
+    expect(copy.message).toContain("Merkle proof lookup failed");
+    expect(copy.hint).toContain("not finalized");
+  });
+
   it("marks previous steps complete while a later step is active", () => {
     const [fetchStep, proveStep, submitStep] = WITHDRAW_STEP_SEQUENCE;
 
