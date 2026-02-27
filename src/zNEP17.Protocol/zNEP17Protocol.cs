@@ -12,9 +12,7 @@ namespace zNEP17.Protocol;
 [ManifestExtra("Description", "zNEP-17 privacy vault for Neo N3 with zk-SNARK based private transfers.")]
 [ManifestExtra("Version", "0.1.0")]
 [SupportedStandards("zNEP-17")]
-[ContractPermission(Permission.Any, "transfer")]
-[ContractPermission(Permission.Any, "verify")]
-[ContractPermission(Permission.Any, "verifyTreeUpdate")]
+[ContractPermission(Permission.Any, "transfer", "verify", "verifyTreeUpdate")]
 public class zNEP17Protocol : SmartContract
 {
     public delegate void PrivacyDepositDelegate(UInt160 asset, UInt160 stealthAddress, BigInteger amount, byte[] leaf, BigInteger index);

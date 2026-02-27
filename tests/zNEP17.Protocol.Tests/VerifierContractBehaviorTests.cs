@@ -166,6 +166,58 @@ public class VerifierContractBehaviorTests
     }
 
     [Fact]
+    public void VerifyTreeUpdate_Accepts_ValidFixture_Directly()
+    {
+        var engine = new TestEngine(true);
+        var verifier = engine.Deploy<Neo.SmartContract.Testing.zNEP17Groth16Verifier>(
+            Neo.SmartContract.Testing.zNEP17Groth16Verifier.Nef,
+            Neo.SmartContract.Testing.zNEP17Groth16Verifier.Manifest,
+            null);
+
+        TreeUpdateFixture fixture = LoadTreeUpdateFixture();
+        byte[] proof = Convert.FromHexString(fixture.ProofHex);
+        byte[] publicInputs = Convert.FromHexString(fixture.PublicInputsHex);
+        byte[] oldRoot = Convert.FromHexString(fixture.OldRoot);
+        byte[] newRoot = Convert.FromHexString(fixture.NewRoot);
+        byte[] oldLeaf = Convert.FromHexString(fixture.OldLeaf);
+        byte[] newLeaf = Convert.FromHexString(fixture.NewLeaf);
+        BigInteger leafIndex = BigInteger.Parse(fixture.LeafIndex);
+
+        engine.Fee += 100_000_000_000;
+
+        bool? result = verifier.VerifyTreeUpdate(
+            proof,
+            publicInputs,
+            oldRoot,
+            newRoot,
+            oldLeaf,
+            newLeaf,
+            leafIndex);
+
+        Assert.True(result);
+    }
+
+    [Fact]
+    public void Fixture_TreeUpdatePublicInputs_Match_VerifierBindingOrder()
+    {
+        TreeUpdateFixture fixture = LoadTreeUpdateFixture();
+        byte[] publicInputs = Convert.FromHexString(fixture.PublicInputsHex);
+        Assert.Equal(160, publicInputs.Length);
+
+        byte[] oldRoot = Convert.FromHexString(fixture.OldRoot);
+        byte[] newRoot = Convert.FromHexString(fixture.NewRoot);
+        byte[] oldLeaf = Convert.FromHexString(fixture.OldLeaf);
+        byte[] newLeaf = Convert.FromHexString(fixture.NewLeaf);
+        BigInteger leafIndex = BigInteger.Parse(fixture.LeafIndex);
+
+        AssertSlice(publicInputs, 0 * 32, Reverse32(oldRoot));
+        AssertSlice(publicInputs, 1 * 32, Reverse32(newRoot));
+        AssertSlice(publicInputs, 2 * 32, Reverse32(oldLeaf));
+        AssertSlice(publicInputs, 3 * 32, Reverse32(newLeaf));
+        AssertSlice(publicInputs, 4 * 32, EncodeBigIntegerScalar(leafIndex));
+    }
+
+    [Fact]
     public void Fixture_OfflineBlsEquation_MatchesVerificationKey()
     {
         ValidWithdrawFixture fixture = LoadValidFixture();
@@ -267,6 +319,17 @@ public class VerifierContractBehaviorTests
         return value!;
     }
 
+    private static TreeUpdateFixture LoadTreeUpdateFixture()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "Fixtures", "valid_tree_update_fixture.json");
+        string json = File.ReadAllText(path);
+        TreeUpdateFixture? value = JsonSerializer.Deserialize<TreeUpdateFixture>(
+            json,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        Assert.NotNull(value);
+        return value!;
+    }
+
     private static void AssertSlice(byte[] source, int offset, byte[] expected)
     {
         Assert.True(offset >= 0 && offset + expected.Length <= source.Length);
@@ -332,5 +395,16 @@ public class VerifierContractBehaviorTests
         public string GammaG2 { get; set; } = string.Empty;
         public string DeltaG2 { get; set; } = string.Empty;
         public string[] IcG1 { get; set; } = Array.Empty<string>();
+    }
+
+    private sealed class TreeUpdateFixture
+    {
+        public string OldRoot { get; set; } = string.Empty;
+        public string NewRoot { get; set; } = string.Empty;
+        public string OldLeaf { get; set; } = string.Empty;
+        public string NewLeaf { get; set; } = string.Empty;
+        public string LeafIndex { get; set; } = string.Empty;
+        public string ProofHex { get; set; } = string.Empty;
+        public string PublicInputsHex { get; set; } = string.Empty;
     }
 }

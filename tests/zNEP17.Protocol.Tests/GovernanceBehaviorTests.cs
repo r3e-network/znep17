@@ -5,6 +5,7 @@ using Neo.SmartContract.Testing.Exceptions;
 using System;
 using System.Numerics;
 using System.Reflection;
+using System.Text.Json;
 using Xunit;
 
 namespace zNEP17.Protocol.Tests;
@@ -12,6 +13,39 @@ namespace zNEP17.Protocol.Tests;
 [Trait("IntegrationMode", "Governance")]
 public class GovernanceBehaviorTests
 {
+    [Fact]
+    public void Manifest_Allows_VerifyTreeUpdate_CallPermission()
+    {
+        string manifestJson = Neo.SmartContract.Testing.zNEP17Protocol.Manifest.ToJson().ToString();
+        using JsonDocument document = JsonDocument.Parse(manifestJson);
+
+        JsonElement permissions = document.RootElement.GetProperty("permissions");
+        bool foundPermission = false;
+        foreach (JsonElement permission in permissions.EnumerateArray())
+        {
+            if (!permission.TryGetProperty("methods", out JsonElement methods) || methods.ValueKind != JsonValueKind.Array)
+                continue;
+
+            bool hasVerifyTreeUpdate = false;
+            foreach (JsonElement method in methods.EnumerateArray())
+            {
+                if (method.ValueKind == JsonValueKind.String && method.GetString() == "verifyTreeUpdate")
+                {
+                    hasVerifyTreeUpdate = true;
+                    break;
+                }
+            }
+
+            if (hasVerifyTreeUpdate)
+            {
+                foundPermission = true;
+                break;
+            }
+        }
+
+        Assert.True(foundPermission, "Contract manifest permissions must include verifyTreeUpdate.");
+    }
+
     [Fact]
     public void SetPaused_And_SetVerifier_AreOwnerOnly()
     {

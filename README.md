@@ -6,7 +6,7 @@ This repository implements a SNARK-verified zNEP-17 privacy vault stack for Neo 
 
 - Neo N3 vault contract: `src/zNEP17.Protocol/zNEP17Protocol.cs`
 - Deposit flow with commitment leaf ingestion and on-chain note metadata binding (`commitment -> asset + amount + index`)
-- Root publication flow via dedicated tree maintainer (`setTreeMaintainer` + `updateMerkleRoot`)
+- Root publication flow via trustless tree-update proofs (`updateMerkleRoot(proof, publicInputs, newRoot)`)
 - Withdraw flow with root/nullifier/commitment checks, verifier boundary, and relayer-witness enforcement
 - Replay protection with full on-chain leaf history and bounded known-root history
 - Commitment replay protection (`isCommitmentSpent`) in addition to nullifier replay protection
@@ -45,13 +45,13 @@ npm run testnet:e2e
 What it verifies:
 
 - successful `Deposit -> Withdraw`
-- tree-maintainer `updateMerkleRoot` flow after each deposit
+- proof-backed `updateMerkleRoot` flow after each deposit
 - verifier rejection keeps state unchanged
 - unknown root rejection
 - `fee >= amount` rejection
 - commitment amount-binding rejection
 - nullifier replay rejection
-- missing verifier rejection on secondary vault
+- missing verifier rejection for tree-root updates on secondary vault
 
 Output:
 
@@ -73,9 +73,19 @@ After contract ABI changes:
 - return: `bool`
 - args: `asset`, `proof`, `publicInputs`, `merkleRoot`, `nullifierHash`, `commitment`, `recipient`, `relayer`, `amount`, `fee`
 
+`updateMerkleRoot` expects verifier method:
+
+- name: `verifyTreeUpdate`
+- return: `bool`
+- args: `proof`, `publicInputs`, `oldRoot`, `newRoot`, `oldLeaf`, `newLeaf`, `leafIndex`
+
 `publicInputs` are bound to an 8-signal schema:
 
-- `root`, `nullifierHash`, `recipient`, `relayer`, `amount`, `fee`, `asset`, `commitment`
+- `root`, `nullifierHash`, `recipient`, `relayer`, `fee`, `asset`, `amount`, `commitment`
+
+`updateMerkleRoot` `publicInputs` are bound to a 5-signal schema:
+
+- `oldRoot`, `newRoot`, `oldLeaf`, `newLeaf`, `leafIndex`
 
 Additionally, contract execution requires:
 

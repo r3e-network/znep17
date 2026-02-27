@@ -10,7 +10,7 @@ This Next.js application provides the zNEP-17 user interface and a SNARK-verifyi
 4. **Server-bound withdrawal execution**: relayer signs withdraw tx; contract enforces configured relayer witness.
 5. **Commitment-bound proofs**: public input schema binds `asset` + `commitment` to prevent cross-asset and amount-domain abuse.
 6. **ZK artifact integrity guard**: `npm run verify:zk` pins SHA-256 checksums and enforces sync with canonical `circuits/bls/*` artifacts.
-7. **Hardened tree maintainer endpoint**: authenticated + lock-guarded Merkle root publication with Supabase cache reconciliation.
+7. **Hardened tree update endpoint**: authenticated + lock-guarded, proof-backed Merkle root publication with Supabase cache reconciliation.
 
 ## Setup
 
@@ -28,12 +28,15 @@ RELAYER_REQUIRE_AUTH=false
 RELAYER_REQUIRE_ORIGIN_ALLOWLIST=true
 RELAYER_REQUIRE_DURABLE_GUARDS=false
 RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER=false
-# Tree maintainer (recommended: cron/server-to-server only)
+# Tree updater (recommended: cron/server-to-server only)
 MAINTAINER_VAULT_HASH=0xYourVaultContractHash
-MAINTAINER_WIF=MaintainerWifForTreeMaintainerRole
+MAINTAINER_WIF=MaintainerWifWithGas
 MAINTAINER_REQUIRE_AUTH=true
 MAINTAINER_API_KEY=another-strong-random-secret
 MAINTAINER_REQUIRE_DURABLE_LOCK=false
+# Optional: override tree-update proving artifact locations
+# MAINTAINER_TREE_UPDATE_WASM_PATH=/absolute/path/to/tree_update.wasm
+# MAINTAINER_TREE_UPDATE_ZKEY_PATH=/absolute/path/to/tree_update_final.zkey
 # Optional: pin expected on-chain verifier hash (recommended, required in production strong mode)
 # RELAYER_EXPECTED_VERIFIER_HASH=0xYourVerifierContractHash
 # Optional frontend deployment tuning:
@@ -59,7 +62,8 @@ npm run dev
 - `POST /api/relay`
   - expects SNARK proof payload, validates proof off-chain, submits `withdraw`
 - `POST /api/maintainer`
-  - server-maintainer endpoint: syncs missing leaves from chain/Supabase cache, computes root, and submits `updateMerkleRoot`
+  - server updater endpoint: syncs missing leaves from chain/Supabase cache, builds a Groth16 tree-update proof, and submits `updateMerkleRoot(proof, publicInputs, newRoot)` for the next leaf step
+  - response includes `remainingLeaves`; invoke again until it reaches `0` to catch up fully
 
 ## Production Requirements
 

@@ -16,12 +16,17 @@ const WIF = process.env.ZNEP17_TESTNET_WIF;
 const TREE_DEPTH = 20;
 const SCALAR_BYTES = 32;
 const PROOF_BYTES = 192;
-const PUBLIC_INPUTS_BYTES = 256;
+const WITHDRAW_PUBLIC_INPUTS_BYTES = 256;
+const TREE_UPDATE_PUBLIC_INPUTS_BYTES = 160;
+const WITHDRAW_PUBLIC_INPUT_COUNT = 8;
+const TREE_UPDATE_PUBLIC_INPUT_COUNT = 5;
 const COMPRESSED_FLAG = 0x80;
 const INFINITY_FLAG = 0x40;
 const SIGN_FLAG = 0x20;
 const CIRCUIT_WASM = path.join(__dirname, "..", "circuits", "bls", "withdraw_js", "withdraw.wasm");
 const CIRCUIT_ZKEY = path.join(__dirname, "..", "circuits", "bls", "withdraw_final.zkey");
+const TREE_UPDATE_WASM = path.join(__dirname, "..", "circuits", "tree_update_js", "tree_update.wasm");
+const TREE_UPDATE_ZKEY = path.join(__dirname, "..", "circuits", "tree_update_final.zkey");
 
 let cachedBlsCurve = null;
 
@@ -136,11 +141,14 @@ function encodeLe32(value, label) {
   return out;
 }
 
-function packPublicInputs(publicSignals) {
-  assertCondition(Array.isArray(publicSignals) && publicSignals.length === 8, "expected 8 public signals");
+function packPublicInputs(publicSignals, expectedCount) {
+  assertCondition(
+    Array.isArray(publicSignals) && publicSignals.length === expectedCount,
+    `expected ${expectedCount} public signals`
+  );
   const buffers = publicSignals.map((signal, index) => encodeLe32(BigInt(signal), `publicSignals[${index}]`));
   const packed = Buffer.concat(buffers);
-  assertCondition(packed.length === PUBLIC_INPUTS_BYTES, "packed public inputs length mismatch");
+  assertCondition(packed.length === expectedCount * SCALAR_BYTES, "packed public inputs length mismatch");
   return packed;
 }
 
@@ -288,7 +296,8 @@ async function buildWithdrawPayload({
   }
 
   const packedProof = await packGroth16ProofForNeo(prove.proof);
-  const packedPublicInputs = packPublicInputs(publicSignals);
+  const packedPublicInputs = packPublicInputs(publicSignals, WITHDRAW_PUBLIC_INPUT_COUNT);
+  assertCondition(packedPublicInputs.length === WITHDRAW_PUBLIC_INPUTS_BYTES, "withdraw public input payload length mismatch");
 
   return {
     rootHex,
@@ -296,6 +305,78 @@ async function buildWithdrawPayload({
     commitmentHex: newNote.commitmentHex,
     proofHex: packedProof.toString("hex"),
     publicInputsHex: packedPublicInputs.toString("hex")
+  };
+}
+
+async function buildTreeUpdatePayload({
+  leaves,
+  leafIndex
+}) {
+  assertCondition(Number.isSafeInteger(leafIndex) && leafIndex >= 0, "leafIndex must be a non-negative safe integer");
+  assertCondition(Array.isArray(leaves), "leaves must be an array");
+  assertCondition(leafIndex < leaves.length, `leafIndex ${leafIndex} is out of bounds for ${leaves.length} leaves`);
+
+  const oldLeaves = leaves.slice(0, leafIndex);
+  const newLeaf = leaves[leafIndex];
+  assertCondition(typeof newLeaf === "bigint", "new leaf must be bigint");
+
+  const zeroHashes = buildZeroHashes();
+  const oldLayers = buildMerkleLayers(oldLeaves, zeroHashes);
+
+  const pathElements = [];
+  let idx = leafIndex;
+  for (let d = 0; d < TREE_DEPTH; d++) {
+    const siblingIdx = idx % 2 === 0 ? idx + 1 : idx - 1;
+    const sibling = oldLayers[d][siblingIdx] ?? zeroHashes[d];
+    pathElements.push(sibling.toString());
+    idx = Math.floor(idx / 2);
+  }
+
+  const oldRoot = oldLayers[TREE_DEPTH][0] ?? zeroHashes[TREE_DEPTH];
+  const newRoot = computeMerkleProof(leaves, leafIndex, zeroHashes).root;
+  const oldLeaf = 0n;
+  const leafIndexBig = BigInt(leafIndex);
+
+  const witnessInput = {
+    oldRoot: oldRoot.toString(),
+    newRoot: newRoot.toString(),
+    oldLeaf: oldLeaf.toString(),
+    newLeaf: newLeaf.toString(),
+    leafIndex: leafIndexBig.toString(),
+    pathElements
+  };
+
+  const expectedSignals = [
+    oldRoot.toString(),
+    newRoot.toString(),
+    oldLeaf.toString(),
+    newLeaf.toString(),
+    leafIndexBig.toString()
+  ];
+
+  const prove = await snarkjs.groth16.fullProve(witnessInput, TREE_UPDATE_WASM, TREE_UPDATE_ZKEY);
+  const publicSignals = prove.publicSignals.map((value) => BigInt(value).toString());
+  assertCondition(publicSignals.length === TREE_UPDATE_PUBLIC_INPUT_COUNT, "tree update public signal length mismatch");
+  for (let i = 0; i < expectedSignals.length; i++) {
+    assertCondition(
+      publicSignals[i] === expectedSignals[i],
+      `tree update public signal mismatch at index ${i}: expected=${expectedSignals[i]} actual=${publicSignals[i]}`
+    );
+  }
+
+  const packedProof = await packGroth16ProofForNeo(prove.proof);
+  const packedPublicInputs = packPublicInputs(publicSignals, TREE_UPDATE_PUBLIC_INPUT_COUNT);
+  assertCondition(
+    packedPublicInputs.length === TREE_UPDATE_PUBLIC_INPUTS_BYTES,
+    "tree update public input payload length mismatch"
+  );
+
+  return {
+    oldRootHex: toHex32(oldRoot),
+    newRootHex: toHex32(newRoot),
+    proofHex: packedProof.toString("hex"),
+    publicInputsHex: packedPublicInputs.toString("hex"),
+    leafIndex
   };
 }
 
@@ -342,6 +423,8 @@ async function main() {
   assertSecureRpcUrl(DEFAULT_RPC);
   assertCondition(fs.existsSync(CIRCUIT_WASM), `Missing circuit wasm: ${CIRCUIT_WASM}`);
   assertCondition(fs.existsSync(CIRCUIT_ZKEY), `Missing circuit zkey: ${CIRCUIT_ZKEY}`);
+  assertCondition(fs.existsSync(TREE_UPDATE_WASM), `Missing tree update wasm: ${TREE_UPDATE_WASM}`);
+  assertCondition(fs.existsSync(TREE_UPDATE_ZKEY), `Missing tree update zkey: ${TREE_UPDATE_ZKEY}`);
 
   const report = {
     startedAtUtc: new Date().toISOString(),
@@ -498,12 +581,6 @@ async function main() {
     return toBigInt(stack[0]);
   }
 
-  
-  async function readLeafCount(vaultHash) {
-    const stack = await readInvoke(vaultHash, "getLeafIndex", []);
-    return Number(stack[0].value);
-  }
-
   async function readCurrentRootHex(vaultHash) {
     const stack = await readInvoke(vaultHash, "getCurrentRoot");
     return toBytes(stack[0]).toString("hex");
@@ -593,16 +670,19 @@ async function main() {
   const verifierState = await rpcClient.getContractState(verifierHash);
   const verifierMethods = (verifierState?.manifest?.abi?.methods || []).map((m) => m.name);
   const verifierPublicMethods = verifierMethods.filter((name) => !name.startsWith("_"));
-  const verifierManifestStrong = verifierPublicMethods.length === 1 && verifierPublicMethods[0] === "verify";
+  const verifierManifestStrong =
+    verifierPublicMethods.length === 2 &&
+    verifierPublicMethods.includes("verify") &&
+    verifierPublicMethods.includes("verifyTreeUpdate");
   report.assertions.push({
     label: "verifier_manifest_public_method_surface",
-    expected: "verify only",
+    expected: "verify,verifyTreeUpdate",
     actual: verifierPublicMethods.join(","),
     pass: verifierManifestStrong
   });
   assertCondition(
     verifierManifestStrong,
-    `Verifier manifest method surface mismatch. Expected [verify], got [${verifierPublicMethods.join(",")}]`
+    `Verifier manifest method surface mismatch. Expected [verify, verifyTreeUpdate], got [${verifierPublicMethods.join(",")}]`
   );
 
   const tokenContract = new experimental.SmartContract(tokenHash, ownerConfig);
@@ -629,12 +709,6 @@ async function main() {
   await persistInvokeAndAssert({
     label: "vault_allow_asset_main",
     invoke: () => vaultContract.invoke("setAssetAllowed", [stackParamHash160(tokenHash), sc.ContractParam.boolean(true)], ownerSignerGlobal),
-    expectFault: false
-  });
-
-  await persistInvokeAndAssert({
-    label: "vault_set_tree_maintainer_main",
-    invoke: () => vaultContract.invoke("setTreeMaintainer", [stackParamHash160(owner.address)], ownerSignerGlobal),
     expectFault: false
   });
 
@@ -682,16 +756,28 @@ async function main() {
     relayerScriptHash: owner.scriptHash,
     fee: 2n
   });
+  const treeUpdateA = await buildTreeUpdatePayload({
+    leaves: mainLeaves,
+    leafIndex: mainLeaves.length - 1
+  });
 
   await persistInvokeAndAssert({
     label: "vault_update_root_s1",
-    invoke: async () => { const count = await readLeafCount(vaultHash); return vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadA.rootHex), sc.ContractParam.integer(count)], ownerSignerGlobal); },
+    invoke: () => vaultContract.invoke(
+      "updateMerkleRoot",
+      [
+        stackParamByteArrayHex(treeUpdateA.proofHex),
+        stackParamByteArrayHex(treeUpdateA.publicInputsHex),
+        stackParamByteArrayHex(treeUpdateA.newRootHex)
+      ],
+      ownerSignerGlobal
+    ),
     expectFault: false
   });
 
   const rootA = await readCurrentRootHex(vaultHash);
   const nullifierA = payloadA.nullifierHex;
-  assertCondition(rootA === payloadA.rootHex, `Scenario 1 root mismatch expected ${payloadA.rootHex}, got ${rootA}`);
+  assertCondition(rootA === treeUpdateA.newRootHex, `Scenario 1 root mismatch expected ${treeUpdateA.newRootHex}, got ${rootA}`);
 
   const verifierDirectValid = await readVerifierResult(verifierHash, {
     assetHash: tokenHash,
@@ -803,15 +889,27 @@ async function main() {
     relayerScriptHash: owner.scriptHash,
     fee: 1n
   });
+  const treeUpdateB = await buildTreeUpdatePayload({
+    leaves: mainLeaves,
+    leafIndex: mainLeaves.length - 1
+  });
 
   await persistInvokeAndAssert({
     label: "vault_update_root_s2",
-    invoke: async () => { const count = await readLeafCount(vaultHash); return vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadB.rootHex), sc.ContractParam.integer(count)], ownerSignerGlobal); },
+    invoke: () => vaultContract.invoke(
+      "updateMerkleRoot",
+      [
+        stackParamByteArrayHex(treeUpdateB.proofHex),
+        stackParamByteArrayHex(treeUpdateB.publicInputsHex),
+        stackParamByteArrayHex(treeUpdateB.newRootHex)
+      ],
+      ownerSignerGlobal
+    ),
     expectFault: false
   });
 
   const rootB = await readCurrentRootHex(vaultHash);
-  assertCondition(rootB === payloadB.rootHex, `Scenario 2 root mismatch expected ${payloadB.rootHex}, got ${rootB}`);
+  assertCondition(rootB === treeUpdateB.newRootHex, `Scenario 2 root mismatch expected ${treeUpdateB.newRootHex}, got ${rootB}`);
   const vaultBalanceBeforeFailS2 = await readBalance(tokenHash, vaultHash);
   const tamperedPublicInputsB = Buffer.from(payloadB.publicInputsHex, "hex");
   tamperedPublicInputsB[0] ^= 0x01;
@@ -902,15 +1000,27 @@ async function main() {
     relayerScriptHash: owner.scriptHash,
     fee: 1n
   });
+  const treeUpdateC = await buildTreeUpdatePayload({
+    leaves: mainLeaves,
+    leafIndex: mainLeaves.length - 1
+  });
 
   await persistInvokeAndAssert({
     label: "vault_update_root_s3",
-    invoke: async () => { const count = await readLeafCount(vaultHash); return vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadC.rootHex), sc.ContractParam.integer(count)], ownerSignerGlobal); },
+    invoke: () => vaultContract.invoke(
+      "updateMerkleRoot",
+      [
+        stackParamByteArrayHex(treeUpdateC.proofHex),
+        stackParamByteArrayHex(treeUpdateC.publicInputsHex),
+        stackParamByteArrayHex(treeUpdateC.newRootHex)
+      ],
+      ownerSignerGlobal
+    ),
     expectFault: false
   });
 
   const rootC = await readCurrentRootHex(vaultHash);
-  assertCondition(rootC === payloadC.rootHex, `Scenario 3 root mismatch expected ${payloadC.rootHex}, got ${rootC}`);
+  assertCondition(rootC === treeUpdateC.newRootHex, `Scenario 3 root mismatch expected ${treeUpdateC.newRootHex}, got ${rootC}`);
   assertCondition(rootC !== unknownRoot, "Scenario 3 unknown root accidentally matched current root");
   const vaultBalanceBeforeFailS3 = await readBalance(tokenHash, vaultHash);
 
@@ -999,15 +1109,27 @@ async function main() {
     relayerScriptHash: owner.scriptHash,
     fee: 1n
   });
+  const treeUpdateD = await buildTreeUpdatePayload({
+    leaves: mainLeaves,
+    leafIndex: mainLeaves.length - 1
+  });
 
   await persistInvokeAndAssert({
     label: "vault_update_root_s4",
-    invoke: async () => { const count = await readLeafCount(vaultHash); return vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadD.rootHex), sc.ContractParam.integer(count)], ownerSignerGlobal); },
+    invoke: () => vaultContract.invoke(
+      "updateMerkleRoot",
+      [
+        stackParamByteArrayHex(treeUpdateD.proofHex),
+        stackParamByteArrayHex(treeUpdateD.publicInputsHex),
+        stackParamByteArrayHex(treeUpdateD.newRootHex)
+      ],
+      ownerSignerGlobal
+    ),
     expectFault: false
   });
 
   const rootD = await readCurrentRootHex(vaultHash);
-  assertCondition(rootD === payloadD.rootHex, `Scenario 4 root mismatch expected ${payloadD.rootHex}, got ${rootD}`);
+  assertCondition(rootD === treeUpdateD.newRootHex, `Scenario 4 root mismatch expected ${treeUpdateD.newRootHex}, got ${rootD}`);
   const vaultBalanceBeforeFailS4 = await readBalance(tokenHash, vaultHash);
 
   await persistInvokeAndAssert({
@@ -1095,15 +1217,27 @@ async function main() {
     relayerScriptHash: owner.scriptHash,
     fee: 1n
   });
+  const treeUpdateG = await buildTreeUpdatePayload({
+    leaves: mainLeaves,
+    leafIndex: mainLeaves.length - 1
+  });
 
   await persistInvokeAndAssert({
     label: "vault_update_root_s4b",
-    invoke: async () => { const count = await readLeafCount(vaultHash); return vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadG.rootHex), sc.ContractParam.integer(count)], ownerSignerGlobal); },
+    invoke: () => vaultContract.invoke(
+      "updateMerkleRoot",
+      [
+        stackParamByteArrayHex(treeUpdateG.proofHex),
+        stackParamByteArrayHex(treeUpdateG.publicInputsHex),
+        stackParamByteArrayHex(treeUpdateG.newRootHex)
+      ],
+      ownerSignerGlobal
+    ),
     expectFault: false
   });
 
   const rootG = await readCurrentRootHex(vaultHash);
-  assertCondition(rootG === payloadG.rootHex, `Scenario 4b root mismatch expected ${payloadG.rootHex}, got ${rootG}`);
+  assertCondition(rootG === treeUpdateG.newRootHex, `Scenario 4b root mismatch expected ${treeUpdateG.newRootHex}, got ${rootG}`);
   const vaultBalanceBeforeFailS4b = await readBalance(tokenHash, vaultHash);
 
   await persistInvokeAndAssert({
@@ -1191,15 +1325,27 @@ async function main() {
     relayerScriptHash: owner.scriptHash,
     fee: 1n
   });
+  const treeUpdateF = await buildTreeUpdatePayload({
+    leaves: mainLeaves,
+    leafIndex: mainLeaves.length - 1
+  });
 
   await persistInvokeAndAssert({
     label: "vault_update_root_s5",
-    invoke: async () => { const count = await readLeafCount(vaultHash); return vaultContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadF.rootHex), sc.ContractParam.integer(count)], ownerSignerGlobal); },
+    invoke: () => vaultContract.invoke(
+      "updateMerkleRoot",
+      [
+        stackParamByteArrayHex(treeUpdateF.proofHex),
+        stackParamByteArrayHex(treeUpdateF.publicInputsHex),
+        stackParamByteArrayHex(treeUpdateF.newRootHex)
+      ],
+      ownerSignerGlobal
+    ),
     expectFault: false
   });
 
   const rootF = await readCurrentRootHex(vaultHash);
-  assertCondition(rootF === payloadF.rootHex, `Scenario 5 root mismatch expected ${payloadF.rootHex}, got ${rootF}`);
+  assertCondition(rootF === treeUpdateF.newRootHex, `Scenario 5 root mismatch expected ${treeUpdateF.newRootHex}, got ${rootF}`);
 
   await persistInvokeAndAssert({
     label: "vault_withdraw_first_s5",
@@ -1285,11 +1431,6 @@ async function main() {
 
   const vaultNoVerifierHash = await deployFromArtifacts("zNEP17Protocol", altOwnerConfig, "vaultNoVerifier");
   const vaultNoVerifierContract = new experimental.SmartContract(vaultNoVerifierHash, altOwnerConfig);
-  const altOwnerFaultConfig = {
-    ...altOwnerConfig,
-    systemFeeOverride: u.BigInteger.fromDecimal(5, 8)
-  };
-  const vaultNoVerifierContractFault = new experimental.SmartContract(vaultNoVerifierHash, altOwnerFaultConfig);
 
   await persistInvokeAndAssert({
     label: "vault_no_verifier_set_relayer_s6",
@@ -1318,14 +1459,7 @@ async function main() {
     expectFault: false
   });
 
-  await persistInvokeAndAssert({
-    label: "vault_no_verifier_set_tree_maintainer_s6",
-    invoke: () => vaultNoVerifierContract.invoke("setTreeMaintainer", [stackParamHash160(altOwner.address)], altOwnerSignerGlobal),
-    expectFault: false
-  });
-
   const stealthE = new wallet.Account();
-  const recipientE = new wallet.Account();
   const noVerifierLeaves = [];
   const noteE = buildNote(0x9201, 10n, tokenHash);
   const leafE = noteE.commitmentHex;
@@ -1350,46 +1484,29 @@ async function main() {
   });
 
   noVerifierLeaves.push(noteE.commitment);
-  const payloadE = await buildWithdrawPayload({
-    note: noteE,
+  const treeUpdateE = await buildTreeUpdatePayload({
     leaves: noVerifierLeaves,
-    leafIndex: noVerifierLeaves.length - 1,
-    recipientScriptHash: recipientE.scriptHash,
-    relayerScriptHash: altOwner.scriptHash,
-    fee: 1n
+    leafIndex: noVerifierLeaves.length - 1
   });
 
+  const vaultNoVerifierBalanceBeforeFail = await readBalance(tokenHash, vaultNoVerifierHash);
   await persistInvokeAndAssert({
     label: "vault_no_verifier_update_root_s6",
-    invoke: async () => { const count = await readLeafCount(vaultNoVerifierHash); return vaultNoVerifierContract.invoke("updateMerkleRoot", [stackParamByteArrayHex(payloadE.rootHex), sc.ContractParam.integer(count)], altOwnerSignerGlobal); },
-    expectFault: false
-  });
-
-  const rootE = await readCurrentRootHex(vaultNoVerifierHash);
-  assertCondition(rootE === payloadE.rootHex, `Scenario 6 root mismatch expected ${payloadE.rootHex}, got ${rootE}`);
-  const vaultNoVerifierBalanceBeforeFail = await readBalance(tokenHash, vaultNoVerifierHash);
-
-  await persistInvokeAndAssert({
-    label: "vault_no_verifier_withdraw_fail_s6",
-    invoke: () => vaultNoVerifierContractFault.invoke(
-      "withdraw",
+    invoke: () => vaultNoVerifierContract.invoke(
+      "updateMerkleRoot",
       [
-        stackParamHash160(tokenHash),
-        stackParamByteArrayHex(payloadE.proofHex),
-        stackParamByteArrayHex(payloadE.publicInputsHex),
-        stackParamByteArrayHex(rootE),
-        stackParamByteArrayHex(nullifierE),
-        stackParamByteArrayHex(payloadE.commitmentHex),
-        stackParamHash160(recipientE.address),
-        stackParamHash160(altOwner.address),
-        stackParamInteger(10),
-        stackParamInteger(1)
+        stackParamByteArrayHex(treeUpdateE.proofHex),
+        stackParamByteArrayHex(treeUpdateE.publicInputsHex),
+        stackParamByteArrayHex(treeUpdateE.newRootHex)
       ],
       altOwnerSignerGlobal
     ),
     expectFault: true,
-    expectExceptionIncludes: "zk proof invalid"
+    expectExceptionIncludes: "verifier not configured"
   });
+
+  const rootE = await readCurrentRootHex(vaultNoVerifierHash);
+  assertCondition(rootE.length === 0, `Scenario 6 root should remain unset when verifier is missing. got=${rootE}`);
 
   const vaultNoVerifierBalanceAfterFail = await readBalance(tokenHash, vaultNoVerifierHash);
   const nullifierEUsed = await readNullifierUsed(vaultNoVerifierHash, nullifierE);

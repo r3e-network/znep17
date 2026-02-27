@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { createHash, timingSafeEqual } from "node:crypto";
+import path from "node:path";
+import { existsSync } from "node:fs";
 import { experimental, rpc, sc, tx, wallet } from "@cityofzion/neon-js";
 import { Redis } from "@upstash/redis";
 import { poseidon2Bls } from "../../lib/blsPoseidon";
 import { getSupabaseAdminClient } from "../../lib/supabase";
 import { isOriginAllowed, parseBearerToken, parseOriginAllowlist } from "../relay/policy";
+import { encodeBigIntToLeScalar, encodeGroth16ProofPayload } from "../relay/zk-encoding";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,6 +19,8 @@ const TREE_DEPTH = 20;
 const DEFAULT_LOCK_TTL_MS = 120_000;
 const DEFAULT_MAX_SYNC_LEAVES = 20_000;
 const DEFAULT_CHAIN_FETCH_CONCURRENCY = 6;
+const TREE_UPDATE_PUBLIC_INPUT_COUNT = 5;
+const TREE_UPDATE_PUBLIC_INPUTS_PACKED_BYTES = 160;
 
 type GuardStoreMode = "memory" | "durable";
 
@@ -24,6 +29,8 @@ type MaintainerConfig = {
   vaultHash: string;
   maintainerWif: string;
   maintainerApiKey: string;
+  treeUpdateWasmPath: string;
+  treeUpdateZkeyPath: string;
   requireAuth: boolean;
   requireOriginAllowlist: boolean;
   requireDurableLock: boolean;
@@ -50,8 +57,28 @@ type RpcInvokeResult = {
 
 type RpcClientInstance = InstanceType<typeof rpc.RPCClient>;
 
+type TreeUpdateSnarkjs = {
+  groth16: {
+    fullProve: (
+      witness: Record<string, unknown>,
+      wasmPath: string,
+      zkeyPath: string,
+    ) => Promise<{ proof: unknown; publicSignals: unknown[] }>;
+  };
+};
+
+type TreeUpdateWitnessData = {
+  oldRoot: bigint;
+  newRoot: bigint;
+  oldLeaf: bigint;
+  newLeaf: bigint;
+  leafIndex: number;
+  pathElements: bigint[];
+};
+
 const ZERO_HASHES = buildZeroHashes();
 const inMemoryLocks = new Map<string, number>();
+let snarkjsPromise: Promise<TreeUpdateSnarkjs> | null = null;
 
 function parseBooleanEnv(raw: string | undefined, defaultValue: boolean): boolean {
   if (typeof raw !== "string") return defaultValue;
@@ -162,6 +189,137 @@ function toRootHex(root: bigint): string {
   let rootHex = root.toString(16);
   while (rootHex.length < 64) rootHex = `0${rootHex}`;
   return rootHex;
+}
+
+async function loadSnarkjs(): Promise<TreeUpdateSnarkjs> {
+  if (!snarkjsPromise) {
+    snarkjsPromise = import("snarkjs") as unknown as Promise<TreeUpdateSnarkjs>;
+  }
+  return snarkjsPromise;
+}
+
+function buildMerkleLayers(leaves: bigint[]): bigint[][] {
+  const layers: bigint[][] = [leaves.slice()];
+  let current = layers[0];
+
+  for (let level = 0; level < TREE_DEPTH; level++) {
+    const nextLength = Math.max(1, Math.ceil(current.length / 2));
+    const next = new Array<bigint>(nextLength);
+    for (let i = 0; i < nextLength; i++) {
+      const left = current[i * 2] ?? ZERO_HASHES[level];
+      const right = current[i * 2 + 1] ?? ZERO_HASHES[level];
+      next[i] = poseidon2Bls([left, right]);
+    }
+    layers.push(next);
+    current = next;
+  }
+
+  return layers;
+}
+
+function buildTreeUpdateWitness(existingLeaves: bigint[], newLeaf: bigint): TreeUpdateWitnessData {
+  const leafIndex = existingLeaves.length;
+  const oldLeaf = 0n;
+  const layers = buildMerkleLayers(existingLeaves);
+  const oldRoot = layers[TREE_DEPTH]?.[0] ?? ZERO_HASHES[TREE_DEPTH];
+
+  const pathElements: bigint[] = [];
+  let idx = leafIndex;
+  for (let level = 0; level < TREE_DEPTH; level++) {
+    const siblingIdx = idx % 2 === 0 ? idx + 1 : idx - 1;
+    pathElements.push(layers[level]?.[siblingIdx] ?? ZERO_HASHES[level]);
+    idx = Math.floor(idx / 2);
+  }
+
+  const newRoot = computeMerkleRoot(existingLeaves.concat([newLeaf]));
+  return { oldRoot, newRoot, oldLeaf, newLeaf, leafIndex, pathElements };
+}
+
+function coerceSignalToBigInt(value: unknown, label: string): bigint {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "string") return BigInt(value);
+  if (typeof value === "number" && Number.isSafeInteger(value)) return BigInt(value);
+  throw new Error(`${label} must be an integer-encoded field element.`);
+}
+
+function encodeTreeUpdatePublicInputs(publicSignals: unknown[]): string {
+  if (!Array.isArray(publicSignals) || publicSignals.length !== TREE_UPDATE_PUBLIC_INPUT_COUNT) {
+    throw new Error(`Tree update proof must expose ${TREE_UPDATE_PUBLIC_INPUT_COUNT} public signals.`);
+  }
+
+  const encoded: Buffer[] = [];
+  for (let i = 0; i < publicSignals.length; i++) {
+    encoded.push(
+      encodeBigIntToLeScalar(
+        coerceSignalToBigInt(publicSignals[i], `treeUpdate.publicSignals[${i}]`),
+        `treeUpdate.publicSignals[${i}]`,
+      ),
+    );
+  }
+
+  const payload = Buffer.concat(encoded);
+  if (payload.length !== TREE_UPDATE_PUBLIC_INPUTS_PACKED_BYTES) {
+    throw new Error("Tree update public input payload length mismatch.");
+  }
+  return payload.toString("base64");
+}
+
+async function buildTreeUpdateProofPayload(
+  config: MaintainerConfig,
+  existingLeaves: bigint[],
+  newLeaf: bigint,
+): Promise<{
+  oldRootHex: string;
+  newRootHex: string;
+  proofPayload: string;
+  publicInputsPayload: string;
+  updatedLeafCount: number;
+}> {
+  const witness = buildTreeUpdateWitness(existingLeaves, newLeaf);
+
+  const witnessInput = {
+    oldRoot: witness.oldRoot.toString(),
+    newRoot: witness.newRoot.toString(),
+    oldLeaf: witness.oldLeaf.toString(),
+    newLeaf: witness.newLeaf.toString(),
+    leafIndex: witness.leafIndex.toString(),
+    pathElements: witness.pathElements.map((entry) => entry.toString()),
+  };
+
+  const expectedPublicSignals = [
+    witness.oldRoot,
+    witness.newRoot,
+    witness.oldLeaf,
+    witness.newLeaf,
+    BigInt(witness.leafIndex),
+  ];
+
+  const snarkjs = await loadSnarkjs();
+  const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+    witnessInput,
+    config.treeUpdateWasmPath,
+    config.treeUpdateZkeyPath,
+  );
+  if (!Array.isArray(publicSignals) || publicSignals.length !== TREE_UPDATE_PUBLIC_INPUT_COUNT) {
+    throw new Error("Tree update proving returned invalid public signals.");
+  }
+  for (let i = 0; i < expectedPublicSignals.length; i++) {
+    const actual = coerceSignalToBigInt(publicSignals[i], `treeUpdate.publicSignals[${i}]`);
+    if (actual !== expectedPublicSignals[i]) {
+      throw new Error(`Tree update public signal mismatch at index ${i}.`);
+    }
+  }
+
+  const proofPayload = await encodeGroth16ProofPayload(proof);
+  const publicInputsPayload = encodeTreeUpdatePublicInputs(publicSignals);
+
+  return {
+    oldRootHex: toRootHex(witness.oldRoot),
+    newRootHex: toRootHex(witness.newRoot),
+    proofPayload,
+    publicInputsPayload,
+    updatedLeafCount: witness.leafIndex + 1,
+  };
 }
 
 function parseRpcInteger(item: RpcStackItem, fieldName: string): number {
@@ -439,6 +597,10 @@ function parseConfig(): MaintainerConfig {
     "";
   const maintainerWif = process.env.MAINTAINER_WIF || "";
   const maintainerApiKey = process.env.MAINTAINER_API_KEY || "";
+  const treeUpdateWasmPath =
+    process.env.MAINTAINER_TREE_UPDATE_WASM_PATH || path.join(process.cwd(), "public", "zk", "tree_update.wasm");
+  const treeUpdateZkeyPath =
+    process.env.MAINTAINER_TREE_UPDATE_ZKEY_PATH || path.join(process.cwd(), "public", "zk", "tree_update_final.zkey");
   const requireAuth = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_AUTH, isProduction);
   const requireOriginAllowlist = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_ORIGIN_ALLOWLIST, false);
   const requireDurableLock = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_DURABLE_LOCK, isProduction);
@@ -462,6 +624,8 @@ function parseConfig(): MaintainerConfig {
     vaultHash,
     maintainerWif,
     maintainerApiKey,
+    treeUpdateWasmPath,
+    treeUpdateZkeyPath,
     requireAuth,
     requireOriginAllowlist,
     requireDurableLock,
@@ -501,6 +665,13 @@ function validateConfig(config: MaintainerConfig): string[] {
     } catch {
       issues.push("MAINTAINER_WIF is invalid.");
     }
+  }
+
+  if (!existsSync(config.treeUpdateWasmPath)) {
+    issues.push(`Tree update wasm artifact is missing at ${config.treeUpdateWasmPath}.`);
+  }
+  if (!existsSync(config.treeUpdateZkeyPath)) {
+    issues.push(`Tree update zkey artifact is missing at ${config.treeUpdateZkeyPath}.`);
   }
 
   if (config.requireAuth && !config.maintainerApiKey) {
@@ -591,7 +762,10 @@ export async function POST(req: Request) {
     const lastRootLeafCount = await callContractInteger(rpcClient, vaultHashPrefixed, "getLastRootLeafCount");
     const currentRootHex = await callContractRootHex(rpcClient, vaultHashPrefixed);
 
-    if (leafCount <= lastRootLeafCount) {
+    if (lastRootLeafCount > leafCount) {
+      throw new Error("Invalid chain state: last rooted leaf count exceeds total leaf count.");
+    }
+    if (leafCount === lastRootLeafCount) {
       return NextResponse.json({
         success: true,
         message: "Tree is already up to date.",
@@ -599,12 +773,13 @@ export async function POST(req: Request) {
       });
     }
 
-    const leafCache = await loadLeafCache(leafCount);
-    let missingIndices = buildMissingIndices(leafCache, leafCount);
+    const requiredLeafCount = lastRootLeafCount + 1;
+    const leafCache = await loadLeafCache(requiredLeafCount);
+    let missingIndices = buildMissingIndices(leafCache, requiredLeafCount);
     if (missingIndices.length > config.maxSyncLeaves) {
       return NextResponse.json(
         {
-          error: `Supabase cache is missing ${missingIndices.length} leaves, exceeding MAINTAINER_MAX_SYNC_LEAVES=${config.maxSyncLeaves}.`,
+          error: `Supabase cache is missing ${missingIndices.length} leaves required for the next root update step, exceeding MAINTAINER_MAX_SYNC_LEAVES=${config.maxSyncLeaves}.`,
         },
         { status: 503 },
       );
@@ -627,38 +802,39 @@ export async function POST(req: Request) {
         toPersist.push({ leaf_index: index, leaf_hash: leafHash });
       }
       await persistLeaves(toPersist);
-      missingIndices = buildMissingIndices(leafCache, leafCount);
+      missingIndices = buildMissingIndices(leafCache, requiredLeafCount);
       if (missingIndices.length > 0) {
         throw new Error("Leaf cache is still incomplete after sync.");
       }
     }
 
-    const leaves = assembleLeaves(leafCache, leafCount);
-
-    if (lastRootLeafCount > 0) {
-      if (!currentRootHex) {
-        throw new Error("Current root is missing while lastRootLeafCount is non-zero.");
-      }
-      const prefixRoot = computeMerkleRoot(leaves.slice(0, lastRootLeafCount));
-      const prefixRootHex = toRootHex(prefixRoot);
-      if (prefixRootHex !== currentRootHex) {
-        throw new Error(
-          "Cached leaves do not match current on-chain root. Rebuild the cache before publishing a new root.",
-        );
-      }
+    const leaves = assembleLeaves(leafCache, requiredLeafCount);
+    const rootedLeaves = leaves.slice(0, lastRootLeafCount);
+    const nextLeaf = leaves[lastRootLeafCount];
+    if (typeof nextLeaf !== "bigint") {
+      throw new Error(`Missing next leaf at index ${lastRootLeafCount}.`);
     }
 
-    const newRoot = computeMerkleRoot(leaves);
-    const newRootHex = toRootHex(newRoot);
+    const treeUpdateProof = await buildTreeUpdateProofPayload(config, rootedLeaves, nextLeaf);
+    if (currentRootHex && currentRootHex !== treeUpdateProof.oldRootHex) {
+      throw new Error(
+        "Cached leaves do not match current on-chain root. Rebuild the cache before publishing a new root.",
+      );
+    }
+    if (lastRootLeafCount > 0 && !currentRootHex) {
+      throw new Error("Current root is missing while lastRootLeafCount is non-zero.");
+    }
 
     const latestLeafCount = await callContractInteger(rpcClient, vaultHashPrefixed, "getLeafIndex");
     const latestLastRootLeafCount = await callContractInteger(rpcClient, vaultHashPrefixed, "getLastRootLeafCount");
-    if (latestLeafCount !== leafCount || latestLastRootLeafCount !== lastRootLeafCount) {
+    if (latestLastRootLeafCount !== lastRootLeafCount || latestLeafCount < requiredLeafCount) {
       return NextResponse.json(
         {
-          error: "Chain state changed while computing root. Retry update to avoid publishing stale data.",
+          error: "Root state changed while computing proof. Retry update to avoid publishing stale data.",
           previousLeafCount: leafCount,
           currentLeafCount: latestLeafCount,
+          previousLastRootLeafCount: lastRootLeafCount,
+          currentLastRootLeafCount: latestLastRootLeafCount,
         },
         { status: 409 },
       );
@@ -682,21 +858,27 @@ export async function POST(req: Request) {
       }),
     ];
 
-    const rootPayload = Buffer.from(newRootHex, "hex").toString("base64");
+    const newRootPayload = Buffer.from(treeUpdateProof.newRootHex, "hex").toString("base64");
     const txid = await contract.invoke(
       "updateMerkleRoot",
-      [sc.ContractParam.byteArray(rootPayload), sc.ContractParam.integer(leafCount)],
+      [
+        sc.ContractParam.byteArray(treeUpdateProof.proofPayload),
+        sc.ContractParam.byteArray(treeUpdateProof.publicInputsPayload),
+        sc.ContractParam.byteArray(newRootPayload),
+      ],
       signers,
     );
 
-    const metadataWarning = await appendRootMetadata(leafCount, newRootHex, txid);
+    const metadataWarning = await appendRootMetadata(treeUpdateProof.updatedLeafCount, treeUpdateProof.newRootHex, txid);
+    const remainingLeaves = Math.max(0, latestLeafCount - treeUpdateProof.updatedLeafCount);
 
     return NextResponse.json({
       success: true,
       message: "Merkle root updated successfully.",
       txid,
-      newRoot: newRootHex,
-      leavesProcessed: leafCount,
+      newRoot: treeUpdateProof.newRootHex,
+      leavesProcessed: treeUpdateProof.updatedLeafCount,
+      remainingLeaves,
       ...(metadataWarning ? { warning: `Root published but metadata insert failed: ${metadataWarning}` } : {}),
     });
   } catch (error: unknown) {

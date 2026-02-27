@@ -7,6 +7,7 @@ type DepositRow = { leaf_index: number; leaf_hash: string };
 const rpcInvokeFunctionMock = vi.fn();
 const rpcGetVersionMock = vi.fn();
 const contractInvokeMock = vi.fn();
+const fullProveMock = vi.fn();
 const depositsUpsertMock = vi.fn();
 const merkleInsertMock = vi.fn();
 const supabaseFromMock = vi.fn();
@@ -107,6 +108,25 @@ vi.mock("../../lib/supabase", () => ({
   })),
 }));
 
+vi.mock("snarkjs", () => ({
+  groth16: {
+    fullProve: fullProveMock,
+  },
+}));
+
+vi.mock("../relay/zk-encoding", () => ({
+  encodeGroth16ProofPayload: vi.fn(async () => Buffer.alloc(192, 0x42).toString("base64")),
+  encodeBigIntToLeScalar: (value: bigint) => {
+    const out = Buffer.alloc(32);
+    let remaining = value;
+    for (let i = 0; i < 32; i++) {
+      out[i] = Number(remaining & 0xffn);
+      remaining >>= 8n;
+    }
+    return out;
+  },
+}));
+
 function configureSupabaseMock(): void {
   supabaseFromMock.mockImplementation((table: string) => {
     if (table === "deposits") {
@@ -200,10 +220,24 @@ beforeEach(() => {
   supabaseState.merkleRoots = [];
   supabaseState.upsertError = null;
   supabaseState.insertError = null;
+  depositsUpsertMock.mockReset();
+  merkleInsertMock.mockReset();
+  supabaseFromMock.mockReset();
   configureSupabaseMock();
   rpcInvokeFunctionMock.mockReset();
   rpcGetVersionMock.mockReset();
   contractInvokeMock.mockReset();
+  fullProveMock.mockReset();
+  fullProveMock.mockImplementation(async (witness: Record<string, string>) => ({
+    proof: {},
+    publicSignals: [
+      witness.oldRoot,
+      witness.newRoot,
+      witness.oldLeaf,
+      witness.newLeaf,
+      witness.leafIndex,
+    ],
+  }));
 });
 
 afterEach(() => {
@@ -281,7 +315,7 @@ describe("maintainer route", () => {
 
     rpcInvokeFunctionMock.mockImplementation(async (_hash: string, operation: string) => {
       if (operation === "getLeafIndex") return intResult(3);
-      if (operation === "getLastRootLeafCount") return intResult(0);
+      if (operation === "getLastRootLeafCount") return intResult(2);
       if (operation === "getCurrentRoot") return emptyByteResult();
       throw new Error(`Unexpected operation: ${operation}`);
     });
@@ -295,7 +329,31 @@ describe("maintainer route", () => {
     expect(contractInvokeMock).not.toHaveBeenCalled();
   });
 
-  it("returns conflict when chain leaf count changes during root computation", async () => {
+  it("does not block on missing leaves beyond the next update step", async () => {
+    setBaseEnv();
+    const env = process.env as Record<string, string | undefined>;
+    env["MAINTAINER_MAX_SYNC_LEAVES"] = "1";
+    rpcGetVersionMock.mockResolvedValue({ protocol: { network: 894710606 } });
+    contractInvokeMock.mockResolvedValue("0xtesttx");
+
+    rpcInvokeFunctionMock.mockImplementation(async (_hash: string, operation: string) => {
+      if (operation === "getLeafIndex") return intResult(3);
+      if (operation === "getLastRootLeafCount") return intResult(0);
+      if (operation === "getCurrentRoot") return emptyByteResult();
+      if (operation === "getLeaf") return byteResult("03".repeat(32));
+      throw new Error(`Unexpected operation: ${operation}`);
+    });
+
+    const { POST } = await loadRoute();
+    const response = await POST(new Request("https://app.example.com/api/maintainer", { method: "POST" }));
+
+    expect(response.status).toBe(200);
+    const getLeafCalls = rpcInvokeFunctionMock.mock.calls.filter(([, operation]) => operation === "getLeaf");
+    expect(getLeafCalls).toHaveLength(1);
+    expect(contractInvokeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows leaf count growth during proof computation", async () => {
     setBaseEnv();
     supabaseState.deposits = [{ leaf_index: 0, leaf_hash: "01".repeat(32) }];
 
@@ -307,16 +365,16 @@ describe("maintainer route", () => {
       }
       if (operation === "getLastRootLeafCount") return intResult(0);
       if (operation === "getCurrentRoot") return emptyByteResult();
+      if (operation === "getLeaf") return byteResult("01".repeat(32));
       throw new Error(`Unexpected operation: ${operation}`);
     });
+    rpcGetVersionMock.mockResolvedValue({ protocol: { network: 894710606 } });
+    contractInvokeMock.mockResolvedValue("0xtesttx");
 
     const { POST } = await loadRoute();
     const response = await POST(new Request("https://app.example.com/api/maintainer", { method: "POST" }));
-    const payload = (await response.json()) as { error?: string };
-
-    expect(response.status).toBe(409);
-    expect(payload.error).toContain("Chain state changed while computing root");
-    expect(contractInvokeMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(contractInvokeMock).toHaveBeenCalledTimes(1);
   });
 
   it("publishes a root and persists metadata on success", async () => {
@@ -349,8 +407,86 @@ describe("maintainer route", () => {
     expect(payload.newRoot).toMatch(/^[0-9a-f]{64}$/);
     expect(payload.leavesProcessed).toBe(1);
     expect(contractInvokeMock).toHaveBeenCalledTimes(1);
+    const [operation, params] = contractInvokeMock.mock.calls[0] as [string, Array<{ type: string; value: string }>];
+    expect(operation).toBe("updateMerkleRoot");
+    expect(Array.isArray(params)).toBe(true);
+    expect(params).toHaveLength(3);
+    expect(params[0]?.type).toBe("ByteArray"); // tree-update proof payload (base64)
+    expect(params[1]?.type).toBe("ByteArray"); // tree-update public inputs payload (base64)
+    expect(params[2]?.type).toBe("ByteArray"); // new root payload (base64)
     expect(depositsUpsertMock).toHaveBeenCalledTimes(1);
     expect(merkleInsertMock).toHaveBeenCalledTimes(1);
     expect(supabaseState.merkleRoots).toHaveLength(1);
+  });
+
+  it("catches up one leaf per run until remainingLeaves reaches zero", async () => {
+    setBaseEnv();
+    rpcGetVersionMock.mockResolvedValue({ protocol: { network: 894710606 } });
+
+    const chainState = {
+      leafCount: 3,
+      lastRootLeafCount: 0,
+      currentRootHex: "",
+      leaves: ["01".repeat(32), "02".repeat(32), "03".repeat(32)],
+    };
+
+    rpcInvokeFunctionMock.mockImplementation(async (_hash: string, operation: string, args: unknown[] = []) => {
+      if (operation === "getLeafIndex") return intResult(chainState.leafCount);
+      if (operation === "getLastRootLeafCount") return intResult(chainState.lastRootLeafCount);
+      if (operation === "getCurrentRoot") {
+        return chainState.currentRootHex ? byteResult(chainState.currentRootHex) : emptyByteResult();
+      }
+      if (operation === "getLeaf") {
+        const request = args[0] as { value?: unknown } | undefined;
+        const index = typeof request?.value === "number" ? request.value : Number(request?.value);
+        return byteResult(chainState.leaves[index] || "00".repeat(32));
+      }
+      throw new Error(`Unexpected operation: ${operation}`);
+    });
+
+    contractInvokeMock.mockImplementation(async (_operation: string, params: Array<{ value: string }>) => {
+      const newRootPayload = params[2]?.value || "";
+      chainState.currentRootHex = Buffer.from(newRootPayload, "base64").toString("hex");
+      chainState.lastRootLeafCount += 1;
+      return `0xtesttx${chainState.lastRootLeafCount}`;
+    });
+
+    const { POST } = await loadRoute();
+    async function runOnce() {
+      const response = await POST(new Request("https://app.example.com/api/maintainer", { method: "POST" }));
+      const payload = (await response.json()) as {
+        leavesProcessed?: number;
+        remainingLeaves?: number;
+        message?: string;
+        currentLeaves?: number;
+      };
+      return { response, payload };
+    }
+
+    const first = await runOnce();
+    expect(first.response.status).toBe(200);
+    expect(first.payload.leavesProcessed).toBe(1);
+    expect(first.payload.remainingLeaves).toBe(2);
+
+    const second = await runOnce();
+    expect(second.response.status).toBe(200);
+    expect(second.payload.leavesProcessed).toBe(2);
+    expect(second.payload.remainingLeaves).toBe(1);
+
+    const third = await runOnce();
+    expect(third.response.status).toBe(200);
+    expect(third.payload.leavesProcessed).toBe(3);
+    expect(third.payload.remainingLeaves).toBe(0);
+
+    const fourth = await runOnce();
+    expect(fourth.response.status).toBe(200);
+    expect(fourth.payload.message).toBe("Tree is already up to date.");
+    expect(fourth.payload.currentLeaves).toBe(3);
+
+    expect(contractInvokeMock).toHaveBeenCalledTimes(3);
+    const getLeafCalls = rpcInvokeFunctionMock.mock.calls.filter(([, operation]) => operation === "getLeaf");
+    expect(getLeafCalls).toHaveLength(3);
+    expect(depositsUpsertMock).toHaveBeenCalledTimes(3);
+    expect(merkleInsertMock).toHaveBeenCalledTimes(3);
   });
 });
