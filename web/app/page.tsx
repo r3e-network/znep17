@@ -6,6 +6,7 @@ import { wallet } from "@cityofzion/neon-js";
 import { poseidon1Bls, poseidon4Bls } from "./lib/blsPoseidon";
 import { summarizeRelayConfigFailure } from "./lib/relay-config";
 import { getWalletConnectErrorMessage } from "./lib/wallet-errors";
+import { buildAutofillPrivacyTicket, formatPrivacyTicket, parsePrivacyTicket } from "./lib/privacy-ticket";
 import {
   WITHDRAW_STEP_SEQUENCE,
   getWithdrawFailureCopy,
@@ -65,13 +66,20 @@ const TOKEN_DEFAULT = "0xd2a4cff31913016155e38e474a2c06d08be276cf";
 const TOKEN_GAS = "0xd2a4cff31913016155e38e474a2c06d08be276cf";
 const TOKEN_NEO = "0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5";
 const RELAYER_FEE_FIXED8 = "100000000";
+const MERKLE_FINALIZATION_RETRY_ATTEMPTS = 6;
+const MERKLE_FINALIZATION_RETRY_DELAY_MS = 5000;
+const LEGACY_PENDING_KEY = "znep17_has_pending";
+const LEGACY_LAST_SECRET_KEY = "znep17_last_secret";
+const LEGACY_LAST_NULLIFIER_KEY = "znep17_last_nullifier";
+const LEGACY_LAST_AMOUNT_KEY = "znep17_last_amount";
+const LEGACY_LAST_TOKEN_KEY = "znep17_last_token";
 const HASH160_HEX_RE = /^(?:0x)?[0-9a-fA-F]{40}$/;
 const HEX_32_RE = /^[0-9a-fA-F]{64}$/;
 const SECRET_RE = /^[0-9a-fA-F]{1,64}$/;
 const DECIMAL_RE = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
 const EXPLORER_TX_BASE_OVERRIDE = sanitizeExplorerTxBaseUrl(process.env.NEXT_PUBLIC_EXPLORER_TX_BASE_URL || "");
 const EXPLORER_TX_BASE_BY_NETWORK_MAGIC: Record<number, string> = {
-  894710606: "https://testnet.ndora.org/transaction/",
+  894710606: "https://testnet.neotube.io/transaction/",
   860833102: "https://ndora.org/transaction/",
 };
 const PUBLIC_BASE_PATH = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH || "");
@@ -133,11 +141,23 @@ function randomHex(bytes: number): string {
   return Array.from(value, (n) => n.toString(16).padStart(2, "0")).join("");
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function normalizeBasePath(path: string): string {
   const trimmed = path.trim();
   if (!trimmed) return "";
   const normalized = trimmed.replace(/^\/+|\/+$/g, "");
   return normalized ? `/${normalized}` : "";
+}
+
+function getTicketStorageKey(address: string): string {
+  return `znep17_ticket_${address.trim().toLowerCase()}`;
+}
+
+function getTicketPendingStorageKey(address: string): string {
+  return `znep17_ticket_pending_${address.trim().toLowerCase()}`;
 }
 
 function withBasePath(path: string): string {
@@ -290,36 +310,49 @@ export default function Home() {
   const [nullifierPrivHex, setNullifierPrivHex] = useState("");
   const [ticketAmount, setTicketAmount] = useState("");
   const [ticketAsset, setTicketAsset] = useState("");
+  const [ticketInput, setTicketInput] = useState("");
   const [copiedKey, setCopiedKey] = useState<"ticket" | "secret" | "nullifier" | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  
   const getTicketString = () => {
     if (!secretHex || !nullifierPrivHex || !ticketAmount || !ticketAsset) return "";
-    return `znep17-${secretHex}-${nullifierPrivHex}-${ticketAmount}-${ticketAsset}`;
+    return formatPrivacyTicket({
+      secretHex: secretHex.trim().toLowerCase(),
+      nullifierHex: nullifierPrivHex.trim().toLowerCase(),
+      amount: ticketAmount.trim(),
+      tokenHash: ticketAsset.trim().toLowerCase(),
+    });
   };
 
   const handleTicketInput = (val: string) => {
-    const parts = val.replace('znep17-', '').split('-');
-    if (parts.length === 4) {
-      const candidateToken = parts[3].trim().toLowerCase();
-      if (!isSupportedTokenHash(candidateToken)) {
-        setError("Privacy Ticket asset is not supported by this app. Please use GAS or NEO.");
-        return;
-      }
-      setError("");
-      setSecretHex(parts[0]);
-      setNullifierPrivHex(parts[1]);
-      setTicketAmount(parts[2]);
-      setTicketAsset(candidateToken);
-      setAmount(parts[2]); // Default withdraw amount to full amount
-      setTokenHash(candidateToken);
-    } else if (parts.length === 2) {
-      setError("");
-      setSecretHex(parts[0]);
-      setNullifierPrivHex(parts[1]);
-    } else {
-      setSecretHex(val);
+    setTicketInput(val);
+    setSecretHex("");
+    setNullifierPrivHex("");
+    setTicketAmount("");
+    setTicketAsset("");
+    const parsed = parsePrivacyTicket(val);
+    if (parsed.error) {
+      setError(parsed.error);
+      return;
+    }
+    if (!parsed.complete || !parsed.ticket) return;
+
+    const ticket = parsed.ticket;
+    const normalizedToken = ticket.tokenHash.trim().toLowerCase();
+    setError("");
+    setSecretHex(ticket.secretHex);
+    setNullifierPrivHex(ticket.nullifierHex);
+    setTicketAmount(ticket.amount);
+    setTicketAsset(normalizedToken);
+    setAmount(ticket.amount);
+    if (isSupportedTokenHash(normalizedToken)) {
+      setTokenHash(normalizedToken);
+    }
+    const normalizedTicket = formatPrivacyTicket(ticket);
+    setTicketInput(normalizedTicket);
+    if (account?.address) {
+      localStorage.setItem(getTicketStorageKey(account.address), normalizedTicket);
+      localStorage.setItem(getTicketPendingStorageKey(account.address), "true");
     }
   };
 
@@ -425,28 +458,50 @@ export default function Home() {
   }, [loadRelayConfig]);
 
   useEffect(() => {
-    const hasPending = localStorage.getItem("znep17_has_pending");
-    if (hasPending === "true") {
-       const lsSecret = localStorage.getItem("znep17_last_secret");
-       const lsNullifier = localStorage.getItem("znep17_last_nullifier");
-       const lsAmount = localStorage.getItem("znep17_last_amount");
-       const lsToken = localStorage.getItem("znep17_last_token");
-       
-       if (lsSecret) setSecretHex(lsSecret);
-       if (lsNullifier) setNullifierPrivHex(lsNullifier);
-       if (lsAmount) { setAmount(lsAmount); setTicketAmount(lsAmount); }
-       if (lsToken) {
-         const normalizedStoredToken = lsToken.trim().toLowerCase();
-         if (isSupportedTokenHash(normalizedStoredToken)) {
-           setTokenHash(normalizedStoredToken);
-           setTicketAsset(normalizedStoredToken);
-         } else {
-           setTokenHash(TOKEN_DEFAULT);
-           setTicketAsset(TOKEN_DEFAULT);
-         }
-       }
+    if (!account?.address) return;
+
+    const address = account.address;
+    const pendingKey = getTicketPendingStorageKey(address);
+    const ticketKey = getTicketStorageKey(address);
+    let pending = localStorage.getItem(pendingKey);
+    let storedTicket = localStorage.getItem(ticketKey);
+
+    if (!storedTicket && localStorage.getItem(LEGACY_PENDING_KEY) === "true") {
+      const legacyTicket = buildAutofillPrivacyTicket({
+        secretHex: localStorage.getItem(LEGACY_LAST_SECRET_KEY),
+        nullifierHex: localStorage.getItem(LEGACY_LAST_NULLIFIER_KEY),
+        amount: localStorage.getItem(LEGACY_LAST_AMOUNT_KEY),
+        tokenHash: localStorage.getItem(LEGACY_LAST_TOKEN_KEY),
+      });
+      if (legacyTicket) {
+        localStorage.setItem(ticketKey, legacyTicket);
+        localStorage.setItem(pendingKey, "true");
+        storedTicket = legacyTicket;
+        pending = "true";
+      }
+      localStorage.removeItem(LEGACY_PENDING_KEY);
+      localStorage.removeItem(LEGACY_LAST_SECRET_KEY);
+      localStorage.removeItem(LEGACY_LAST_NULLIFIER_KEY);
+      localStorage.removeItem(LEGACY_LAST_AMOUNT_KEY);
+      localStorage.removeItem(LEGACY_LAST_TOKEN_KEY);
     }
-  }, []);
+
+    if (pending !== "true" || !storedTicket) return;
+
+    setTicketInput(storedTicket);
+    const parsed = parsePrivacyTicket(storedTicket);
+    if (!parsed.ticket) return;
+
+    const normalizedToken = parsed.ticket.tokenHash.trim().toLowerCase();
+    setSecretHex(parsed.ticket.secretHex);
+    setNullifierPrivHex(parsed.ticket.nullifierHex);
+    setAmount(parsed.ticket.amount);
+    setTicketAmount(parsed.ticket.amount);
+    setTicketAsset(normalizedToken);
+    if (isSupportedTokenHash(normalizedToken)) {
+      setTokenHash(normalizedToken);
+    }
+  }, [account?.address]);
 
   const connectWallet = async () => {
     try {
@@ -603,7 +658,23 @@ export default function Home() {
 
       currentStep = "fetch_merkle";
       setWithdrawActiveStep(currentStep);
-      const merkleProof = await fetchMerkleProofFromRelay(noteArtifacts.commitmentHex);
+      let merkleProof: MerkleProofResponse | null = null;
+      for (let attempt = 0; attempt < MERKLE_FINALIZATION_RETRY_ATTEMPTS; attempt++) {
+        try {
+          merkleProof = await fetchMerkleProofFromRelay(noteArtifacts.commitmentHex);
+          break;
+        } catch (error: unknown) {
+          const message = getErrorMessage(error, "Failed to fetch Merkle proof from relay").toLowerCase();
+          const isFinalizationDelay = message.includes("not yet included in a finalized merkle root");
+          if (!isFinalizationDelay || attempt === MERKLE_FINALIZATION_RETRY_ATTEMPTS - 1) {
+            throw error;
+          }
+          await sleep(MERKLE_FINALIZATION_RETRY_DELAY_MS);
+        }
+      }
+      if (!merkleProof) {
+        throw new Error("Failed to fetch Merkle proof from relay");
+      }
       const merkleRootHex = merkleProof.root;
 
       currentStep = "generate_proof";
@@ -677,6 +748,13 @@ export default function Home() {
       setTxHash(data.txid);
       setSecretHex("");
       setNullifierPrivHex("");
+      setTicketAmount("");
+      setTicketAsset("");
+      setTicketInput("");
+      if (account?.address) {
+        localStorage.removeItem(getTicketStorageKey(account.address));
+        localStorage.removeItem(getTicketPendingStorageKey(account.address));
+      }
       setWithdrawCompleted(true);
       setWithdrawFailedStep(null);
       setWithdrawFailureHint("");
@@ -696,16 +774,22 @@ export default function Home() {
     try {
       const sec = randomHex(31);
       const nul = randomHex(31);
+      const normalizedToken = tokenHash.trim().toLowerCase();
       setSecretHex(sec);
       setNullifierPrivHex(nul);
-
-      localStorage.setItem("znep17_last_secret", sec);
-      localStorage.setItem("znep17_last_nullifier", nul);
-      localStorage.setItem("znep17_last_amount", amount);
-      localStorage.setItem("znep17_last_token", tokenHash);
       setTicketAmount(amount);
-      setTicketAsset(tokenHash);
-      localStorage.setItem("znep17_has_pending", "true");
+      setTicketAsset(normalizedToken);
+      const generatedTicket = formatPrivacyTicket({
+        secretHex: sec,
+        nullifierHex: nul,
+        amount,
+        tokenHash: normalizedToken,
+      });
+      setTicketInput(generatedTicket);
+      if (account?.address) {
+        localStorage.setItem(getTicketStorageKey(account.address), generatedTicket);
+        localStorage.setItem(getTicketPendingStorageKey(account.address), "true");
+      }
 
       if (!stealthAddress && account) {
         setStealthAddress(account.address);
@@ -714,6 +798,8 @@ export default function Home() {
       setError(getErrorMessage(err, "Failed to generate random privacy parameters"));
     }
   };
+
+  const ticketDisplay = getTicketString() || ticketInput;
 
   return (
     <main className="container mx-auto max-w-7xl px-4 py-8">
@@ -776,7 +862,7 @@ export default function Home() {
                     <label className="mb-1 block text-sm font-medium text-gray-500">Manual Privacy Ticket</label>
                     <input
                       type="password"
-                      value={getTicketString()}
+                      value={ticketInput}
                       onChange={(e) => handleTicketInput(e.target.value)}
                       className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 font-mono text-sm text-white focus:border-blue-500 focus:outline-none transition-colors"
                       placeholder="Paste your znep17-... ticket here"
@@ -933,15 +1019,16 @@ export default function Home() {
                     <span className="rounded bg-yellow-500/20 px-2 py-0.5 text-[10px] font-bold text-yellow-300">AUTO-SAVED IN BROWSER</span>
                   </div>
                   <p className="mb-4 text-xs text-yellow-600/80">
-                    For maximum security, copy these values. You will need them to withdraw if you clear your browser cache.
+                    Critical: this Privacy Ticket is the only way to withdraw. Anyone with it can spend the note.
+                    Back it up offline now. If you lose it, funds cannot be recovered.
                   </p>
                   <div className="space-y-2 font-mono text-xs">
                     <div className="flex items-center justify-between rounded bg-black/20 p-3 border border-yellow-700/50">
                       <div className="truncate pr-4 text-yellow-200 tracking-wider">
-                        {getTicketString()}
+                        {ticketDisplay}
                       </div>
                       <button 
-                        onClick={() => handleCopy(getTicketString(), "ticket")} 
+                        onClick={() => handleCopy(ticketDisplay, "ticket")} 
                         className="flex items-center gap-1 bg-yellow-600/20 hover:bg-yellow-600/40 text-yellow-400 px-3 py-1.5 rounded transition-colors shrink-0"
                       >
                         {copiedKey === "ticket" ? (
@@ -982,10 +1069,27 @@ export default function Home() {
                   placeholder="Address to receive funds cleanly"
                 />
               </div>
+
+              <div className="mb-4">
+                <label className="mb-1 block text-sm font-medium text-gray-400">Privacy Ticket</label>
+                <input
+                  type="text"
+                  value={ticketInput}
+                  onChange={(e) => handleTicketInput(e.target.value)}
+                  className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 font-mono text-xs text-white"
+                  placeholder="Paste your znep17-... ticket"
+                />
+                <p className="mt-2 text-xs text-gray-500">
+                  Auto-filled from your last deposit when available. You can always paste your own ticket here.
+                </p>
+                <p className="mt-1 text-xs text-amber-400">
+                  Backup this ticket offline and keep it private. Loss or leakage means irreversible fund loss.
+                </p>
+              </div>
               
               {(!secretHex || !nullifierPrivHex) && (
                  <div className="mb-4 rounded border border-yellow-800/50 bg-yellow-950/30 px-4 py-3 text-sm text-yellow-400">
-                    <strong>No auto-saved ticket found.</strong> Please open Advanced Settings to enter your Privacy Ticket manually.
+                    <strong>No valid ticket loaded yet.</strong> Paste a Privacy Ticket above or create one with a new deposit.
                  </div>
               )}
             </div>
@@ -1162,7 +1266,7 @@ export default function Home() {
                   <label className="mb-1 block text-sm font-medium text-gray-500">Manual Privacy Ticket</label>
                   <input
                     type="password"
-                    value={getTicketString()}
+                    value={ticketInput}
                     onChange={(e) => handleTicketInput(e.target.value)}
                     className="w-full rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 font-mono text-sm text-white focus:border-blue-500 focus:outline-none transition-colors"
                     placeholder="Paste your znep17-... ticket here"
