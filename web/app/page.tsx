@@ -657,7 +657,7 @@ export default function Home() {
   };
 
   return (
-    <main className="container mx-auto max-w-4xl px-4 py-8">
+    <main className="container mx-auto max-w-7xl px-4 py-8">
       <header className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center space-x-2">
@@ -804,87 +804,45 @@ export default function Home() {
         </div>
       )}
 
-      {/* Documentation Section */}
-      <div className="mb-8 rounded-xl border border-blue-900/50 bg-blue-950/20 p-6 shadow-xl relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-2 h-full bg-blue-500"></div>
-        <div className="flex items-start gap-4">
-          <div className="mt-1 bg-blue-500/20 p-2 rounded-full text-blue-400">
-            <FileText className="h-6 w-6" />
-          </div>
-          <div>
-            <h2 className="text-lg font-bold text-gray-100 mb-2">How zNEP-17 Works</h2>
-            <p className="text-sm text-gray-400 mb-4 leading-relaxed">
-              zNEP-17 is a Zero-Knowledge privacy vault for the Neo N3 blockchain. It breaks the on-chain link between the sender and the receiver, allowing you to transfer assets anonymously.
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-gray-300">
-              <div>
-                <h3 className="font-semibold text-blue-300 mb-1 flex items-center gap-2"><span className="bg-blue-900 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs">1</span> Deposit</h3>
-                <p className="leading-relaxed">When you deposit, a random <strong>Secret</strong> and <strong>Nullifier</strong> are generated. These are mathematically hashed into a &quot;Leaf&quot; and inserted into the vault&apos;s on-chain Merkle tree. Your wallet is disconnected from this secret ticket.</p>
-              </div>
-              <div>
-                <h3 className="font-semibold text-green-300 mb-1 flex items-center gap-2"><span className="bg-green-900 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs">2</span> Withdraw</h3>
-                <p className="leading-relaxed">To withdraw, your browser generates a <strong>zk-SNARK proof</strong> using your Secret and Nullifier. This proves you own a deposit in the vault without revealing <i>which</i> deposit it is. The funds are sent to a new, completely clean address.</p>
-              </div>
-            </div>
-            
-            <div className="mt-6 pt-4 border-t border-blue-900/30 flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
-              <div className="text-xs text-gray-400">
-                <span className="block mb-1"><strong className="text-gray-300">Vault Contract:</strong> <code className="bg-gray-900 px-1 py-0.5 rounded ml-1 select-all">{vaultHash || process.env.NEXT_PUBLIC_VAULT_HASH || "Loading..."}</code></span>
-                <span className="block"><strong className="text-gray-300">Network:</strong> {networkMagic === 860833102 ? "Mainnet" : "Testnet"} ({networkMagic})</span>
-              </div>
-              <a 
-                href="https://github.com/r3e-network/znep17" 
-                target="_blank" 
-                rel="noreferrer"
-                className="flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors bg-blue-900/30 px-3 py-1.5 rounded"
-              >
-                <Info className="w-3.5 h-3.5" />
-                View Documentation
-              </a>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      
-      {/* Asset and Amount Selection */}
-      <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-2xl mb-8">
-        <div className="flex flex-col md:flex-row gap-4 mb-2">
-          <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-400 mb-2">Select Asset</label>
-            <div className="flex gap-4">
-              <button
-                onClick={() => setTokenHash("0xd2a4cff31913016155e38e474a2c06d08be276cf")}
-                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all ${tokenHash === "0xd2a4cff31913016155e38e474a2c06d08be276cf" ? "border-green-500 bg-green-500/10 text-green-400" : "border-gray-700 hover:border-gray-600 bg-gray-800 text-gray-400"}`}
-              >
-                <svg width="24" height="24" viewBox="0 0 220 220" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-green-500">
+      <div className="mb-8 grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
+        <section className="space-y-8 xl:order-2">
+          {/* Asset and Amount Selection */}
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-2xl">
+            <div className="flex flex-col md:flex-row gap-4 mb-2">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-400 mb-2">Select Asset</label>
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => setTokenHash("0xd2a4cff31913016155e38e474a2c06d08be276cf")}
+                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all ${tokenHash === "0xd2a4cff31913016155e38e474a2c06d08be276cf" ? "border-green-500 bg-green-500/10 text-green-400" : "border-gray-700 hover:border-gray-600 bg-gray-800 text-gray-400"}`}
+                  >
+                    <svg width="24" height="24" viewBox="0 0 220 220" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-green-500">
   <path d="M109.846 0C49.1846 0 0 49.1846 0 109.846C0 170.508 49.1846 220 109.846 220C170.508 220 220 170.508 220 109.846C220 49.1846 170.508 0 109.846 0ZM109.846 205.538C57.0615 205.538 14.4615 162.938 14.4615 110.154C14.4615 57.3692 57.0615 14.7692 109.846 14.7692C162.631 14.7692 205.231 57.3692 205.231 110.154C205.231 162.938 162.631 205.538 109.846 205.538Z" fill="currentColor"/>
   <path d="M165.846 80.6769L115.8 45.4154L55.7538 135.046L105.8 170.308L165.846 80.6769ZM64.6769 133.569L117.277 55.0769L156.923 83.0462L104.323 161.538L64.6769 133.569Z" fill="currentColor"/>
   <path d="M110.154 52.8L121.154 60.1846L86.5846 111.877L75.5846 104.492L110.154 52.8Z" fill="currentColor"/>
   <path d="M136.246 70.2154L147.246 77.6L112.677 129.292L101.677 121.908L136.246 70.2154Z" fill="currentColor"/>
 </svg>
-                <span className="font-semibold tracking-wide">GAS</span>
-              </button>
-              <button
-                onClick={() => setTokenHash("0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5")}
-                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all ${tokenHash === "0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5" ? "border-green-500 bg-green-500/10 text-green-400" : "border-gray-700 hover:border-gray-600 bg-gray-800 text-gray-400"}`}
-              >
-                <svg width="24" height="24" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-green-500">
+                    <span className="font-semibold tracking-wide">GAS</span>
+                  </button>
+                  <button
+                    onClick={() => setTokenHash("0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5")}
+                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border-2 transition-all ${tokenHash === "0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5" ? "border-green-500 bg-green-500/10 text-green-400" : "border-gray-700 hover:border-gray-600 bg-gray-800 text-gray-400"}`}
+                  >
+                    <svg width="24" height="24" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-green-500">
   <path d="M127.9 0L18.5 56.9L0 220.1L127.9 256L256 220.1L237.5 56.9L127.9 0ZM185 102.6V209.5L124.7 172.9L71.5 103V209.5L36.6 199.9V90.5L96.9 127L150.5 197V90.5L185 102.6Z" fill="currentColor"/>
 </svg>
-                <span className="font-semibold tracking-wide">NEO</span>
-              </button>
+                    <span className="font-semibold tracking-wide">NEO</span>
+                  </button>
+                </div>
+              </div>
+              <div className="w-full md:w-1/3">
+                <label className="block text-sm font-medium text-gray-400 mb-2">Amount</label>
+                <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full rounded-xl border-2 border-gray-700 bg-gray-900 px-4 py-3 text-white font-mono text-lg h-[52px] focus:border-green-500 focus:outline-none transition-colors" placeholder="0.0" />
+              </div>
             </div>
           </div>
-          <div className="w-full md:w-1/3">
-            <label className="block text-sm font-medium text-gray-400 mb-2">Amount</label>
-            <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full rounded-xl border-2 border-gray-700 bg-gray-900 px-4 py-3 text-white font-mono text-lg h-[52px] focus:border-green-500 focus:outline-none transition-colors" placeholder="0.0" />
-          </div>
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        
+          <div className="grid grid-cols-1 gap-8 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
           {/* Deposit Card */}
           <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-2xl flex flex-col h-full">
             <h2 className="text-xl font-bold text-green-400 mb-6 flex items-center gap-2">
@@ -950,9 +908,8 @@ export default function Home() {
             </button>
           </div>
 
-        
           {/* Withdraw Card */}
-          <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-2xl flex flex-col h-full mt-4 lg:mt-0">
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 shadow-2xl flex flex-col h-full">
             <h2 className="text-xl font-bold text-blue-400 mb-6 flex items-center gap-2">
               <Shield className="h-5 w-5" /> Withdraw
             </h2>
@@ -1056,7 +1013,52 @@ export default function Home() {
               )}
             </div>
           </div>
+          </div>
+        </section>
 
+        {/* Documentation Section */}
+        <aside className="xl:order-1 xl:sticky xl:top-8 xl:self-start">
+          <div className="relative overflow-hidden rounded-xl border border-blue-900/50 bg-blue-950/20 p-6 shadow-xl">
+            <div className="absolute top-0 left-0 h-full w-2 bg-blue-500"></div>
+            <div className="flex items-start gap-4">
+              <div className="mt-1 rounded-full bg-blue-500/20 p-2 text-blue-400">
+                <FileText className="h-6 w-6" />
+              </div>
+              <div>
+                <h2 className="mb-2 text-lg font-bold text-gray-100">How zNEP-17 Works</h2>
+                <p className="mb-4 text-sm leading-relaxed text-gray-400">
+                  zNEP-17 is a Zero-Knowledge privacy vault for the Neo N3 blockchain. It breaks the on-chain link between the sender and the receiver, allowing you to transfer assets anonymously.
+                </p>
+                <div className="grid grid-cols-1 gap-4 text-sm text-gray-300">
+                  <div>
+                    <h3 className="mb-1 flex items-center gap-2 font-semibold text-blue-300"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-900 text-xs text-white">1</span> Deposit</h3>
+                    <p className="leading-relaxed">When you deposit, a random <strong>Secret</strong> and <strong>Nullifier</strong> are generated. These are mathematically hashed into a &quot;Leaf&quot; and inserted into the vault&apos;s on-chain Merkle tree. Your wallet is disconnected from this secret ticket.</p>
+                  </div>
+                  <div>
+                    <h3 className="mb-1 flex items-center gap-2 font-semibold text-green-300"><span className="flex h-5 w-5 items-center justify-center rounded-full bg-green-900 text-xs text-white">2</span> Withdraw</h3>
+                    <p className="leading-relaxed">To withdraw, your browser generates a <strong>zk-SNARK proof</strong> using your Secret and Nullifier. This proves you own a deposit in the vault without revealing <i>which</i> deposit it is. The funds are sent to a new, completely clean address.</p>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex flex-col items-start justify-between gap-4 border-t border-blue-900/30 pt-4 sm:flex-row sm:items-center">
+                  <div className="text-xs text-gray-400">
+                    <span className="mb-1 block"><strong className="text-gray-300">Vault Contract:</strong> <code className="ml-1 select-all rounded bg-gray-900 px-1 py-0.5">{vaultHash || process.env.NEXT_PUBLIC_VAULT_HASH || "Loading..."}</code></span>
+                    <span className="block"><strong className="text-gray-300">Network:</strong> {networkMagic === 860833102 ? "Mainnet" : "Testnet"} ({networkMagic})</span>
+                  </div>
+                  <a
+                    href="https://github.com/r3e-network/znep17"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1.5 rounded bg-blue-900/30 px-3 py-1.5 text-xs font-semibold text-blue-400 transition-colors hover:text-blue-300"
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                    View Documentation
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
       </div>
 
       
