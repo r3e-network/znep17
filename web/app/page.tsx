@@ -1017,8 +1017,8 @@ export default function Home() {
         </section>
 
         {/* Documentation Section */}
-        <aside className="xl:order-2 xl:sticky xl:top-8 xl:self-start">
-          <div className="relative overflow-hidden rounded-xl border border-blue-900/50 bg-blue-950/20 p-5 shadow-xl">
+        <aside className="xl:order-2 xl:self-start">
+          <div className="relative rounded-xl border border-blue-900/50 bg-blue-950/20 p-5 shadow-xl">
             <div className="absolute top-0 left-0 h-full w-2 bg-blue-500"></div>
             <div className="flex items-start gap-4">
               <div className="mt-1 rounded-full bg-blue-500/20 p-1.5 text-blue-400">
@@ -1042,7 +1042,7 @@ export default function Home() {
 
                 <div className="mt-4 flex flex-col items-start justify-between gap-3 border-t border-blue-900/30 pt-3 sm:flex-row sm:items-center">
                   <div className="text-[11px] text-gray-400">
-                    <span className="mb-1 block"><strong className="text-gray-300">Vault Contract:</strong> <code className="ml-1 select-all rounded bg-gray-900 px-1 py-0.5">{vaultHash || process.env.NEXT_PUBLIC_VAULT_HASH || "Loading..."}</code></span>
+                    <span className="mb-1 block"><strong className="text-gray-300">Vault Contract:</strong> <code className="ml-1 break-all select-all rounded bg-gray-900 px-1 py-0.5">{vaultHash || process.env.NEXT_PUBLIC_VAULT_HASH || "Loading..."}</code></span>
                     <span className="block"><strong className="text-gray-300">Network:</strong> {networkMagic === 860833102 ? "Mainnet" : "Testnet"} ({networkMagic})</span>
                   </div>
                   <a
