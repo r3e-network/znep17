@@ -4,6 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import { Wallet, ArrowRight, Shield, Activity, X, RefreshCw, Copy, Check, Info, FileText } from "lucide-react";
 import { wallet } from "@cityofzion/neon-js";
 import { poseidon1Bls, poseidon4Bls } from "./lib/blsPoseidon";
+import { summarizeRelayConfigFailure } from "./lib/relay-config";
+import {
+  WITHDRAW_STEP_SEQUENCE,
+  getWithdrawFailureCopy,
+  getWithdrawStepCopy,
+  getWithdrawStepVisualState,
+  type WithdrawStep,
+} from "./lib/withdraw-progress";
 
 type NeoLineAccount = { address: string; label: string };
 
@@ -261,11 +269,15 @@ export default function Home() {
   const [recipient, setRecipient] = useState("");
   const [relayer, setRelayer] = useState("");
   const [relayLoading, setRelayLoading] = useState(true);
+  const [relayIssues, setRelayIssues] = useState<string[]>([]);
   const [proofMode, setProofMode] = useState<ProofMode>("snark");
   const [networkMagic, setNetworkMagic] = useState<number | null>(null);
   const [currentRootHex, setCurrentRootHex] = useState("");
 
-  const [zkStatus, setZkStatus] = useState("");
+  const [withdrawActiveStep, setWithdrawActiveStep] = useState<WithdrawStep | null>(null);
+  const [withdrawFailedStep, setWithdrawFailedStep] = useState<WithdrawStep | null>(null);
+  const [withdrawCompleted, setWithdrawCompleted] = useState(false);
+  const [withdrawFailureHint, setWithdrawFailureHint] = useState("");
   const [secretHex, setSecretHex] = useState("");
   const [nullifierPrivHex, setNullifierPrivHex] = useState("");
   const [ticketAmount, setTicketAmount] = useState("");
@@ -311,12 +323,17 @@ export default function Home() {
     try {
       const res = await fetch("/api/relay", { method: "GET", cache: "no-store", headers: buildRelayHeaders() });
       const data = (await res.json()) as RelayConfigResponse;
+      const summary = summarizeRelayConfigFailure(data, "Relayer unavailable.");
 
       if (!res.ok || !data.configured || !data.relayerAddress || !wallet.isAddress(data.relayerAddress)) {
-        const issueSummary = Array.isArray(data.issues) && data.issues.length > 0 ? ` ${data.issues.join(" ")}` : "";
-        throw new Error((data.error || "Relayer unavailable.") + issueSummary);
+        setRelayIssues(summary.issues);
+        throw new Error(summary.message);
       }
       if (data.requiresApiKey) {
+        setRelayIssues([
+          "RELAYER_REQUIRE_AUTH is enabled. Public browser clients cannot send relayer API keys.",
+          "Set RELAYER_REQUIRE_AUTH=false for public frontend usage.",
+        ]);
         throw new Error("Relayer is configured for authenticated API clients only; direct browser mode is disabled.");
       }
 
@@ -336,6 +353,7 @@ export default function Home() {
 
       setProofMode("snark");
       setNetworkMagic(typeof data.networkMagic === "number" ? data.networkMagic : null);
+      setRelayIssues([]);
 
       if (typeof data.currentRoot === "string" && HEX_32_RE.test(data.currentRoot.replace(/^0x/i, ""))) {
         setCurrentRootHex(data.currentRoot.replace(/^0x/i, "").toLowerCase());
@@ -357,6 +375,17 @@ export default function Home() {
   useEffect(() => {
     void loadRelayConfig();
   }, [loadRelayConfig]);
+
+  useEffect(() => {
+    if (relayLoading) return;
+    if (relayer && relayIssues.length === 0) return;
+
+    const timer = setInterval(() => {
+      void loadRelayConfig();
+    }, 30_000);
+
+    return () => clearInterval(timer);
+  }, [loadRelayConfig, relayIssues.length, relayLoading, relayer]);
 
   useEffect(() => {
     const hasPending = localStorage.getItem("znep17_has_pending");
@@ -457,6 +486,10 @@ export default function Home() {
   };
 
   const handleWithdraw = async () => {
+    setWithdrawFailedStep(null);
+    setWithdrawFailureHint("");
+    setWithdrawCompleted(false);
+
     if (!tokenHash || !amount || !recipient || !relayer || !secretHex || !nullifierPrivHex) {
       const missing = [];
       if (!tokenHash) missing.push("Token");
@@ -471,6 +504,8 @@ export default function Home() {
     setLoading(true);
     setError("");
     setTxHash("");
+    let currentStep: WithdrawStep | null = "fetch_merkle";
+    setWithdrawActiveStep(currentStep);
 
     try {
       const assetScriptHash = normalizeHash160(tokenHash, "Token script hash");
@@ -507,11 +542,13 @@ export default function Home() {
       const newCommitmentDecimal = newCommitmentField.toString();
       const newCommitmentHex = newCommitmentField.toString(16).padStart(64, "0");
 
-      setZkStatus("Fetching Merkle proof from relay...");
+      currentStep = "fetch_merkle";
+      setWithdrawActiveStep(currentStep);
       const merkleProof = await fetchMerkleProofFromRelay(noteArtifacts.commitmentHex);
       const merkleRootHex = merkleProof.root;
 
-      setZkStatus("Generating Groth16 proof...");
+      currentStep = "generate_proof";
+      setWithdrawActiveStep(currentStep);
 
       const input = {
         root: merkleProof.rootDecimal,
@@ -550,7 +587,8 @@ export default function Home() {
       const proof = result.proof;
       const publicInputs = result.publicSignals;
 
-      setZkStatus("Submitting withdrawal proof to relayer...");
+      currentStep = "submit_to_relayer";
+      setWithdrawActiveStep(currentStep);
 
       const requestBody: Record<string, unknown> = {
         tokenHash: assetScriptHash,
@@ -580,11 +618,18 @@ export default function Home() {
       setTxHash(data.txid);
       setSecretHex("");
       setNullifierPrivHex("");
+      setWithdrawCompleted(true);
+      setWithdrawFailedStep(null);
+      setWithdrawFailureHint("");
     } catch (err: unknown) {
-      setError(getErrorMessage(err, "Withdraw failed"));
+      const baseMessage = getErrorMessage(err, "Withdraw failed");
+      const failureCopy = getWithdrawFailureCopy(currentStep, baseMessage);
+      setWithdrawFailedStep(currentStep);
+      setWithdrawFailureHint(failureCopy.hint);
+      setError(failureCopy.message);
     } finally {
+      setWithdrawActiveStep(null);
       setLoading(false);
-      setZkStatus("");
     }
   };
 
@@ -720,6 +765,28 @@ export default function Home() {
           <button onClick={() => setError("")}>
             <X className="h-4 w-4" />
           </button>
+        </div>
+      )}
+
+      {relayIssues.length > 0 && (
+        <div className="mb-6 rounded-lg border border-amber-700/60 bg-amber-950/30 px-4 py-3 text-amber-200">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold">Service setup is still in progress. Retrying automatically every 30 seconds.</p>
+            <button
+              onClick={async () => {
+                await loadRelayConfig();
+              }}
+              disabled={relayLoading}
+              className="rounded border border-amber-600/60 bg-amber-900/30 px-3 py-1 text-xs font-semibold text-amber-100 transition-colors hover:bg-amber-900/50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {relayLoading ? "Checking..." : "Check Now"}
+            </button>
+          </div>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-amber-100/90">
+            {relayIssues.map((issue) => (
+              <li key={issue}>{issue}</li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -915,9 +982,78 @@ export default function Home() {
                 className="mt-6 flex w-full items-center justify-center space-x-2 rounded-lg bg-blue-600 py-4 font-bold text-white transition-colors hover:bg-blue-500 focus:ring-4 focus:ring-blue-500/50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {loading ? <Activity className="h-5 w-5 animate-spin" /> : <Shield className="h-5 w-5" />}
-                <span>{relayLoading ? "Loading Relayer..." : "Process Withdraw"}</span>
+                <span>
+                  {relayLoading
+                    ? "Loading Relayer..."
+                    : loading && withdrawActiveStep
+                      ? getWithdrawStepCopy(withdrawActiveStep).label
+                      : "Process Withdraw"}
+                </span>
               </button>
-              {zkStatus && <p className="mt-2 animate-pulse text-center text-sm text-blue-400">{zkStatus}</p>}
+              {(withdrawActiveStep || withdrawFailedStep || withdrawCompleted) && (
+                <div className="mt-3 rounded-lg border border-blue-900/50 bg-blue-950/20 p-3">
+                  <p
+                    className={`text-sm ${
+                      withdrawFailedStep ? "text-red-300" : withdrawCompleted ? "text-green-300" : "text-blue-300"
+                    }`}
+                  >
+                    {withdrawFailedStep
+                      ? "Withdrawal paused before completion."
+                      : withdrawCompleted
+                        ? "Withdrawal submitted successfully."
+                        : withdrawActiveStep
+                          ? getWithdrawStepCopy(withdrawActiveStep).progress
+                          : "Preparing withdrawal..."}
+                  </p>
+                  <ol className="mt-2 space-y-1">
+                    {WITHDRAW_STEP_SEQUENCE.map((step) => {
+                      const visualState = getWithdrawStepVisualState(
+                        step,
+                        withdrawActiveStep,
+                        withdrawFailedStep,
+                        withdrawCompleted,
+                      );
+                      const stateClass =
+                        visualState === "done"
+                          ? "border-green-700/60 bg-green-950/30 text-green-300"
+                          : visualState === "active"
+                            ? "border-blue-700/70 bg-blue-950/40 text-blue-300"
+                            : visualState === "failed"
+                              ? "border-red-700/70 bg-red-950/40 text-red-300"
+                              : "border-gray-800 bg-gray-900/60 text-gray-500";
+                      const stateLabel =
+                        visualState === "done"
+                          ? "Done"
+                          : visualState === "active"
+                            ? "In Progress"
+                            : visualState === "failed"
+                              ? "Failed"
+                              : "Pending";
+
+                      return (
+                        <li key={step} className={`flex items-center justify-between rounded border px-2 py-1 text-xs ${stateClass}`}>
+                          <span>{getWithdrawStepCopy(step).label}</span>
+                          <span className="font-semibold uppercase tracking-wide">{stateLabel}</span>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                  {withdrawFailureHint && (
+                    <p className="mt-2 rounded border border-red-800/60 bg-red-950/40 px-2 py-2 text-xs text-red-300">
+                      {withdrawFailureHint}
+                    </p>
+                  )}
+                  {withdrawFailedStep && !loading && (
+                    <button
+                      onClick={handleWithdraw}
+                      disabled={relayLoading || !relayer || !secretHex}
+                      className="mt-3 w-full rounded-lg border border-blue-500/40 bg-blue-600/20 py-2 text-sm font-semibold text-blue-200 transition-colors hover:bg-blue-600/30 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Retry Withdraw
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

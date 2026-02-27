@@ -13,6 +13,7 @@ const { unstringifyBigInts } = utils;
 const DEFAULT_RPC = process.env.ZNEP17_TESTNET_RPC || "https://n3seed1.ngd.network:20332";
 const REQUIRED_NETWORK_MAGIC = 894710606;
 const WIF = process.env.ZNEP17_TESTNET_WIF;
+const OWNER_WIF = process.env.ZNEP17_TESTNET_OWNER_WIF || "";
 const TREE_DEPTH = 20;
 const SCALAR_BYTES = 32;
 const PROOF_BYTES = 192;
@@ -302,6 +303,7 @@ async function buildWithdrawPayload({
   return {
     rootHex,
     nullifierHex: note.nullifierHex,
+    commitment: newNote.commitment,
     commitmentHex: newNote.commitmentHex,
     proofHex: packedProof.toString("hex"),
     publicInputsHex: packedPublicInputs.toString("hex")
@@ -416,6 +418,21 @@ function stackParamByteArrayHex(hex) {
   return sc.ContractParam.byteArray(Buffer.from(hex, "hex").toString("base64"));
 }
 
+function getErrorMessage(error) {
+  if (error instanceof Error && typeof error.message === "string") {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  return String(error ?? "");
+}
+
+function extractExistingContractHash(errorMessage) {
+  const match = /contract already exists:\s*0x([0-9a-fA-F]{40})/i.exec(errorMessage);
+  return match ? match[1].toLowerCase() : null;
+}
+
 async function main() {
   if (!WIF) {
     throw new Error("Missing ZNEP17_TESTNET_WIF environment variable.");
@@ -470,7 +487,7 @@ async function main() {
   });
   assertCondition(funderGasBalanceStart > 120, `Funder GAS too low: ${funderGasBalanceStart}`);
 
-  const owner = new wallet.Account();
+  const owner = OWNER_WIF ? new wallet.Account(OWNER_WIF) : new wallet.Account();
   const ownerConfig = {
     rpcAddress: DEFAULT_RPC,
     networkMagic,
@@ -549,11 +566,20 @@ async function main() {
     return { txid, execution };
   }
 
-  await persistInvokeAndAssert({
-    label: "fund_owner_gas",
-    invoke: () => funderGasContract.transfer(funder.address, owner.address, 120),
-    expectFault: false
-  });
+  if (owner.address !== funder.address) {
+    await persistInvokeAndAssert({
+      label: "fund_owner_gas",
+      invoke: () => funderGasContract.transfer(funder.address, owner.address, 120),
+      expectFault: false
+    });
+  } else {
+    report.assertions.push({
+      label: "owner_is_funder",
+      expected: false,
+      actual: true,
+      pass: true
+    });
+  }
 
   const gasContract = new experimental.nep17.GASContract(ownerConfig);
   const ownerGasBalanceStart = await gasContract.balanceOf(owner.address);
@@ -584,6 +610,39 @@ async function main() {
   async function readCurrentRootHex(vaultHash) {
     const stack = await readInvoke(vaultHash, "getCurrentRoot");
     return toBytes(stack[0]).toString("hex");
+  }
+
+  async function updateRootAndAssert({
+    contract,
+    vaultHash,
+    leaves,
+    leafIndex,
+    label,
+    signer
+  }) {
+    const treeUpdate = await buildTreeUpdatePayload({
+      leaves,
+      leafIndex
+    });
+
+    await persistInvokeAndAssert({
+      label,
+      invoke: () =>
+        contract.invoke(
+          "updateMerkleRoot",
+          [
+            stackParamByteArrayHex(treeUpdate.proofHex),
+            stackParamByteArrayHex(treeUpdate.publicInputsHex),
+            stackParamByteArrayHex(treeUpdate.newRootHex)
+          ],
+          signer
+        ),
+      expectFault: false
+    });
+
+    const root = await readCurrentRootHex(vaultHash);
+    assertCondition(root === treeUpdate.newRootHex, `${label} root mismatch expected ${treeUpdate.newRootHex}, got ${root}`);
+    return root;
   }
 
   async function readNullifierUsed(vaultHash, nullifierHex) {
@@ -629,11 +688,34 @@ async function main() {
     const nef = sc.NEF.fromBuffer(fs.readFileSync(nefPath));
     const manifest = sc.ContractManifest.fromJson(JSON.parse(fs.readFileSync(manifestPath, "utf8")));
 
-    const deployResult = await persistInvokeAndAssert({
-      label: `${deployLabel}_deploy`,
-      invoke: () => experimental.deployContract(nef, manifest, deployConfig),
-      expectFault: false
-    });
+    let deployResult;
+    try {
+      deployResult = await persistInvokeAndAssert({
+        label: `${deployLabel}_deploy`,
+        invoke: () => experimental.deployContract(nef, manifest, deployConfig),
+        expectFault: false
+      });
+    } catch (error) {
+      const messageRaw = getErrorMessage(error);
+      const message = messageRaw.toLowerCase();
+      if (message.includes("system.storage.local.put failed: syscall not found")) {
+        throw new Error(
+          `${deployLabel} deploy failed on RPC ${DEFAULT_RPC}: endpoint does not support System.Storage.Local deploy simulation. ` +
+          `Use ZNEP17_TESTNET_RPC=https://n3seed1.ngd.network:20332 for this contract build.`
+        );
+      }
+
+      const existingHash = extractExistingContractHash(messageRaw);
+      if (!existingHash) {
+        throw error;
+      }
+
+      throw new Error(
+        `${deployLabel} deployment collision: contract 0x${existingHash} already exists for this deployer and artifact. ` +
+        `This e2e workflow requires fresh contract state. ` +
+        `Run without ZNEP17_TESTNET_OWNER_WIF (random ephemeral owner), or use a different owner WIF.`
+      );
+    }
 
     const deployNotification = (deployResult.execution.notifications || []).find(
       (notification) => notification.eventname === "Deploy"
@@ -656,7 +738,8 @@ async function main() {
     report.contracts[deployLabel] = {
       hash: contractHash,
       name: manifest.name,
-      checksum: nef.checksum
+      checksum: nef.checksum,
+      reused: false
     };
 
     return contractHash;
@@ -756,28 +839,15 @@ async function main() {
     relayerScriptHash: owner.scriptHash,
     fee: 2n
   });
-  const treeUpdateA = await buildTreeUpdatePayload({
+  const rootA = await updateRootAndAssert({
+    contract: vaultContract,
+    vaultHash,
     leaves: mainLeaves,
-    leafIndex: mainLeaves.length - 1
-  });
-
-  await persistInvokeAndAssert({
+    leafIndex: mainLeaves.length - 1,
     label: "vault_update_root_s1",
-    invoke: () => vaultContract.invoke(
-      "updateMerkleRoot",
-      [
-        stackParamByteArrayHex(treeUpdateA.proofHex),
-        stackParamByteArrayHex(treeUpdateA.publicInputsHex),
-        stackParamByteArrayHex(treeUpdateA.newRootHex)
-      ],
-      ownerSignerGlobal
-    ),
-    expectFault: false
+    signer: ownerSignerGlobal
   });
-
-  const rootA = await readCurrentRootHex(vaultHash);
   const nullifierA = payloadA.nullifierHex;
-  assertCondition(rootA === treeUpdateA.newRootHex, `Scenario 1 root mismatch expected ${treeUpdateA.newRootHex}, got ${rootA}`);
 
   const verifierDirectValid = await readVerifierResult(verifierHash, {
     assetHash: tokenHash,
@@ -855,6 +925,16 @@ async function main() {
 
   report.scenarios.push({ name: "success_path", pass: true });
 
+  mainLeaves.push(payloadA.commitment);
+  await updateRootAndAssert({
+    contract: vaultContract,
+    vaultHash,
+    leaves: mainLeaves,
+    leafIndex: mainLeaves.length - 1,
+    label: "vault_update_root_change_s1",
+    signer: ownerSignerGlobal
+  });
+
   // Scenario 2: invalid proof is rejected and state remains unchanged.
   const recipientB = new wallet.Account();
   const stealthB = new wallet.Account();
@@ -889,27 +969,14 @@ async function main() {
     relayerScriptHash: owner.scriptHash,
     fee: 1n
   });
-  const treeUpdateB = await buildTreeUpdatePayload({
+  const rootB = await updateRootAndAssert({
+    contract: vaultContract,
+    vaultHash,
     leaves: mainLeaves,
-    leafIndex: mainLeaves.length - 1
-  });
-
-  await persistInvokeAndAssert({
+    leafIndex: mainLeaves.length - 1,
     label: "vault_update_root_s2",
-    invoke: () => vaultContract.invoke(
-      "updateMerkleRoot",
-      [
-        stackParamByteArrayHex(treeUpdateB.proofHex),
-        stackParamByteArrayHex(treeUpdateB.publicInputsHex),
-        stackParamByteArrayHex(treeUpdateB.newRootHex)
-      ],
-      ownerSignerGlobal
-    ),
-    expectFault: false
+    signer: ownerSignerGlobal
   });
-
-  const rootB = await readCurrentRootHex(vaultHash);
-  assertCondition(rootB === treeUpdateB.newRootHex, `Scenario 2 root mismatch expected ${treeUpdateB.newRootHex}, got ${rootB}`);
   const vaultBalanceBeforeFailS2 = await readBalance(tokenHash, vaultHash);
   const tamperedPublicInputsB = Buffer.from(payloadB.publicInputsHex, "hex");
   tamperedPublicInputsB[0] ^= 0x01;
@@ -963,6 +1030,16 @@ async function main() {
     expectFault: false
   });
 
+  mainLeaves.push(payloadB.commitment);
+  await updateRootAndAssert({
+    contract: vaultContract,
+    vaultHash,
+    leaves: mainLeaves,
+    leafIndex: mainLeaves.length - 1,
+    label: "vault_update_root_change_s2",
+    signer: ownerSignerGlobal
+  });
+
   report.scenarios.push({ name: "invalid_proof_rejected_keeps_state", pass: true });
 
   // Scenario 3: unknown root rejected.
@@ -1000,27 +1077,14 @@ async function main() {
     relayerScriptHash: owner.scriptHash,
     fee: 1n
   });
-  const treeUpdateC = await buildTreeUpdatePayload({
+  const rootC = await updateRootAndAssert({
+    contract: vaultContract,
+    vaultHash,
     leaves: mainLeaves,
-    leafIndex: mainLeaves.length - 1
-  });
-
-  await persistInvokeAndAssert({
+    leafIndex: mainLeaves.length - 1,
     label: "vault_update_root_s3",
-    invoke: () => vaultContract.invoke(
-      "updateMerkleRoot",
-      [
-        stackParamByteArrayHex(treeUpdateC.proofHex),
-        stackParamByteArrayHex(treeUpdateC.publicInputsHex),
-        stackParamByteArrayHex(treeUpdateC.newRootHex)
-      ],
-      ownerSignerGlobal
-    ),
-    expectFault: false
+    signer: ownerSignerGlobal
   });
-
-  const rootC = await readCurrentRootHex(vaultHash);
-  assertCondition(rootC === treeUpdateC.newRootHex, `Scenario 3 root mismatch expected ${treeUpdateC.newRootHex}, got ${rootC}`);
   assertCondition(rootC !== unknownRoot, "Scenario 3 unknown root accidentally matched current root");
   const vaultBalanceBeforeFailS3 = await readBalance(tokenHash, vaultHash);
 
@@ -1073,6 +1137,16 @@ async function main() {
     expectFault: false
   });
 
+  mainLeaves.push(payloadC.commitment);
+  await updateRootAndAssert({
+    contract: vaultContract,
+    vaultHash,
+    leaves: mainLeaves,
+    leafIndex: mainLeaves.length - 1,
+    label: "vault_update_root_change_s3",
+    signer: ownerSignerGlobal
+  });
+
   report.scenarios.push({ name: "unknown_root_rejected", pass: true });
 
   // Scenario 4: fee >= amount rejected.
@@ -1109,27 +1183,14 @@ async function main() {
     relayerScriptHash: owner.scriptHash,
     fee: 1n
   });
-  const treeUpdateD = await buildTreeUpdatePayload({
+  const rootD = await updateRootAndAssert({
+    contract: vaultContract,
+    vaultHash,
     leaves: mainLeaves,
-    leafIndex: mainLeaves.length - 1
-  });
-
-  await persistInvokeAndAssert({
+    leafIndex: mainLeaves.length - 1,
     label: "vault_update_root_s4",
-    invoke: () => vaultContract.invoke(
-      "updateMerkleRoot",
-      [
-        stackParamByteArrayHex(treeUpdateD.proofHex),
-        stackParamByteArrayHex(treeUpdateD.publicInputsHex),
-        stackParamByteArrayHex(treeUpdateD.newRootHex)
-      ],
-      ownerSignerGlobal
-    ),
-    expectFault: false
+    signer: ownerSignerGlobal
   });
-
-  const rootD = await readCurrentRootHex(vaultHash);
-  assertCondition(rootD === treeUpdateD.newRootHex, `Scenario 4 root mismatch expected ${treeUpdateD.newRootHex}, got ${rootD}`);
   const vaultBalanceBeforeFailS4 = await readBalance(tokenHash, vaultHash);
 
   await persistInvokeAndAssert({
@@ -1181,6 +1242,16 @@ async function main() {
     expectFault: false
   });
 
+  mainLeaves.push(payloadD.commitment);
+  await updateRootAndAssert({
+    contract: vaultContract,
+    vaultHash,
+    leaves: mainLeaves,
+    leafIndex: mainLeaves.length - 1,
+    label: "vault_update_root_change_s4",
+    signer: ownerSignerGlobal
+  });
+
   report.scenarios.push({ name: "fee_ge_amount_rejected", pass: true });
 
   // Scenario 4b: commitment amount binding enforced.
@@ -1217,27 +1288,14 @@ async function main() {
     relayerScriptHash: owner.scriptHash,
     fee: 1n
   });
-  const treeUpdateG = await buildTreeUpdatePayload({
+  const rootG = await updateRootAndAssert({
+    contract: vaultContract,
+    vaultHash,
     leaves: mainLeaves,
-    leafIndex: mainLeaves.length - 1
-  });
-
-  await persistInvokeAndAssert({
+    leafIndex: mainLeaves.length - 1,
     label: "vault_update_root_s4b",
-    invoke: () => vaultContract.invoke(
-      "updateMerkleRoot",
-      [
-        stackParamByteArrayHex(treeUpdateG.proofHex),
-        stackParamByteArrayHex(treeUpdateG.publicInputsHex),
-        stackParamByteArrayHex(treeUpdateG.newRootHex)
-      ],
-      ownerSignerGlobal
-    ),
-    expectFault: false
+    signer: ownerSignerGlobal
   });
-
-  const rootG = await readCurrentRootHex(vaultHash);
-  assertCondition(rootG === treeUpdateG.newRootHex, `Scenario 4b root mismatch expected ${treeUpdateG.newRootHex}, got ${rootG}`);
   const vaultBalanceBeforeFailS4b = await readBalance(tokenHash, vaultHash);
 
   await persistInvokeAndAssert({
@@ -1289,6 +1347,16 @@ async function main() {
     expectFault: false
   });
 
+  mainLeaves.push(payloadG.commitment);
+  await updateRootAndAssert({
+    contract: vaultContract,
+    vaultHash,
+    leaves: mainLeaves,
+    leafIndex: mainLeaves.length - 1,
+    label: "vault_update_root_change_s4b",
+    signer: ownerSignerGlobal
+  });
+
   report.scenarios.push({ name: "commitment_amount_binding_enforced", pass: true });
 
   // Scenario 5: nullifier replay rejected.
@@ -1325,27 +1393,14 @@ async function main() {
     relayerScriptHash: owner.scriptHash,
     fee: 1n
   });
-  const treeUpdateF = await buildTreeUpdatePayload({
+  const rootF = await updateRootAndAssert({
+    contract: vaultContract,
+    vaultHash,
     leaves: mainLeaves,
-    leafIndex: mainLeaves.length - 1
-  });
-
-  await persistInvokeAndAssert({
+    leafIndex: mainLeaves.length - 1,
     label: "vault_update_root_s5",
-    invoke: () => vaultContract.invoke(
-      "updateMerkleRoot",
-      [
-        stackParamByteArrayHex(treeUpdateF.proofHex),
-        stackParamByteArrayHex(treeUpdateF.publicInputsHex),
-        stackParamByteArrayHex(treeUpdateF.newRootHex)
-      ],
-      ownerSignerGlobal
-    ),
-    expectFault: false
+    signer: ownerSignerGlobal
   });
-
-  const rootF = await readCurrentRootHex(vaultHash);
-  assertCondition(rootF === treeUpdateF.newRootHex, `Scenario 5 root mismatch expected ${treeUpdateF.newRootHex}, got ${rootF}`);
 
   await persistInvokeAndAssert({
     label: "vault_withdraw_first_s5",
@@ -1398,6 +1453,16 @@ async function main() {
   assertCondition(vaultBalanceBeforeReplayS5 === vaultBalanceAfterReplayS5, "Scenario 5 vault balance changed after replay rejection");
   assertCondition(nullifierFUsed === true, "Scenario 5 nullifier should remain marked used");
 
+  mainLeaves.push(payloadF.commitment);
+  await updateRootAndAssert({
+    contract: vaultContract,
+    vaultHash,
+    leaves: mainLeaves,
+    leafIndex: mainLeaves.length - 1,
+    label: "vault_update_root_change_s5",
+    signer: ownerSignerGlobal
+  });
+
   report.scenarios.push({ name: "nullifier_replay_rejected", pass: true });
 
   // Scenario 6: verifier unset rejection on a second vault from a different deployer.
@@ -1411,6 +1476,10 @@ async function main() {
     rpcAddress: DEFAULT_RPC,
     networkMagic,
     account: altOwner
+  };
+  const altOwnerFaultConfig = {
+    ...altOwnerConfig,
+    systemFeeOverride: u.BigInteger.fromDecimal(5, 8)
   };
 
   const altOwnerSignerGlobal = [
@@ -1431,6 +1500,7 @@ async function main() {
 
   const vaultNoVerifierHash = await deployFromArtifacts("zNEP17Protocol", altOwnerConfig, "vaultNoVerifier");
   const vaultNoVerifierContract = new experimental.SmartContract(vaultNoVerifierHash, altOwnerConfig);
+  const vaultNoVerifierContractFault = new experimental.SmartContract(vaultNoVerifierHash, altOwnerFaultConfig);
 
   await persistInvokeAndAssert({
     label: "vault_no_verifier_set_relayer_s6",
@@ -1492,7 +1562,7 @@ async function main() {
   const vaultNoVerifierBalanceBeforeFail = await readBalance(tokenHash, vaultNoVerifierHash);
   await persistInvokeAndAssert({
     label: "vault_no_verifier_update_root_s6",
-    invoke: () => vaultNoVerifierContract.invoke(
+    invoke: () => vaultNoVerifierContractFault.invoke(
       "updateMerkleRoot",
       [
         stackParamByteArrayHex(treeUpdateE.proofHex),

@@ -238,7 +238,7 @@ public class zNEP17Groth16Verifier : SmartContract
         if (proofA is null || proofB is null || proofC is null)
             return false;
 
-        object vkx = BuildLinearCombinationTreeUpdate(publicInputs);
+        object? vkx = BuildLinearCombinationTreeUpdate(publicInputs);
         if (vkx is null)
             return false;
 
@@ -257,14 +257,16 @@ public class zNEP17Groth16Verifier : SmartContract
         return ok;
     }
 
-    private static object BuildLinearCombinationTreeUpdate(byte[] publicInputs)
+    private static object? BuildLinearCombinationTreeUpdate(byte[] publicInputs)
     {
-        object acc = CryptoLib.Bls12381Deserialize(VerificationKeyTreeUpdate.IcG1[0]);
+        object? acc = CryptoLib.Bls12381Deserialize(VerificationKeyTreeUpdate.IcG1[0]);
+        if (acc is null) return null;
+
         for (int i = 0; i < VerificationKeyTreeUpdate.PublicInputCount; i++)
         {
             byte[] scalar = Slice(publicInputs, i * VerificationKeyTreeUpdate.ScalarLength, VerificationKeyTreeUpdate.ScalarLength);
             byte[] icBytes = VerificationKeyTreeUpdate.IcG1[i + 1];
-            object icPoint = CryptoLib.Bls12381Deserialize(icBytes);
+            object? icPoint = CryptoLib.Bls12381Deserialize(icBytes);
             if (icPoint is null) return null;
 
             object mul = CryptoLib.Bls12381Mul(icPoint, scalar, false);

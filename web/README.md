@@ -19,15 +19,17 @@ npm install
 
 cat > .env.local <<'ENV'
 RPC_URL=https://n3seed1.ngd.network:20332
+# Recommended testnet RPC for current contract build.
+# Some alternative endpoints may reject deploy/invoke simulation for System.Storage.Local syscalls.
 VAULT_HASH=0xYourVaultContractHash
 RELAYER_WIF=YourFundedRelayerWIF
-ALLOWED_TOKEN_HASHES=0xd2a4cff31913016155e38e474a2c06d08be276cf
+ALLOWED_TOKEN_HASHES=0xd2a4cff31913016155e38e474a2c06d08be276cf,0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5
 RELAYER_ALLOWED_ORIGINS=http://localhost:3000
 RELAYER_API_KEY=strong-random-secret
 RELAYER_REQUIRE_AUTH=false
 RELAYER_REQUIRE_ORIGIN_ALLOWLIST=true
 RELAYER_REQUIRE_DURABLE_GUARDS=false
-RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER=false
+RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER=true
 # Tree updater (recommended: cron/server-to-server only)
 MAINTAINER_VAULT_HASH=0xYourVaultContractHash
 MAINTAINER_WIF=MaintainerWifWithGas
@@ -90,6 +92,9 @@ npm run dev
    - `MAINTAINER_API_KEY=<strong secret>`
    - `MAINTAINER_REQUIRE_DURABLE_LOCK=true` with `KV_REST_API_URL` + `KV_REST_API_TOKEN`
 12. Do not expose `MAINTAINER_API_KEY` to browser clients; invoke `/api/maintainer` from cron/server jobs.
+13. Configure maintainer state backend:
+   - `SUPABASE_URL` (or `NEXT_PUBLIC_SUPABASE_URL`)
+   - `SUPABASE_SERVICE_ROLE_KEY`
 
 ## Vercel
 
@@ -103,6 +108,18 @@ The relayer and maintainer routes run in `runtime=nodejs` as dynamic API routes 
 4. Keep install/build commands aligned with `web/vercel.json`:
    - `npm ci`
    - `npm run build`
+
+### Production Env Checklist (Vercel)
+
+1. Use [`web/env.vercel.production.example`](./env.vercel.production.example) as the source template for all Production env vars in Vercel.
+2. Populate secrets and addresses in Vercel Project Settings -> Environment Variables (Production).
+   - For this deployment, keep `RELAYER_ALLOWED_ORIGINS=https://znep17.app,https://www.znep17.app`.
+   - Keep `MAINTAINER_ALLOWED_ORIGINS=https://znep17.app` unless maintainer is called only from a separate backend/cron origin.
+3. Pull the configured Production env set locally:
+   - `vercel env pull .env.vercel.production`
+4. Run the production validator:
+   - `npm run validate:prod-env -- --env-file .env.vercel.production`
+5. The validator must report all required checks as `PASS` before go-live.
 
 ### 404 Troubleshooting (`404: NOT_FOUND`)
 
