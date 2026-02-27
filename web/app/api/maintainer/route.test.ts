@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { existsSync } from "node:fs";
+import path from "node:path";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -180,6 +182,11 @@ function configureSupabaseMock(): void {
 
 function setBaseEnv() {
   const env = process.env as Record<string, string | undefined>;
+  const cwdPublicWasm = path.resolve(process.cwd(), "public", "zk", "tree_update.wasm");
+  const cwdPublicZkey = path.resolve(process.cwd(), "public", "zk", "tree_update_final.zkey");
+  const repoPublicWasm = path.resolve(process.cwd(), "web", "public", "zk", "tree_update.wasm");
+  const repoPublicZkey = path.resolve(process.cwd(), "web", "public", "zk", "tree_update_final.zkey");
+
   env["NODE_ENV"] = "test";
   env["VERCEL_ENV"] = "";
   env["MAINTAINER_VAULT_HASH"] = `0x${"11".repeat(20)}`;
@@ -187,6 +194,10 @@ function setBaseEnv() {
   env["MAINTAINER_REQUIRE_AUTH"] = "false";
   env["MAINTAINER_REQUIRE_DURABLE_LOCK"] = "false";
   env["MAINTAINER_REQUIRE_ORIGIN_ALLOWLIST"] = "false";
+  env["MAINTAINER_TREE_UPDATE_WASM_PATH"] = existsSync(cwdPublicWasm) ? cwdPublicWasm : repoPublicWasm;
+  env["MAINTAINER_TREE_UPDATE_ZKEY_PATH"] = existsSync(cwdPublicZkey) ? cwdPublicZkey : repoPublicZkey;
+  delete env["RELAYER_WIF"];
+  delete env["RELAYER_API_KEY"];
   delete env["MAINTAINER_API_KEY"];
   delete env["MAINTAINER_ALLOWED_ORIGINS"];
   delete env["KV_REST_API_URL"];
@@ -246,7 +257,7 @@ afterEach(() => {
 });
 
 describe("maintainer route", () => {
-  it("fails closed in production when MAINTAINER_API_KEY is missing", async () => {
+  it("fails closed in production when relayer-backed maintainer auth secret is missing", async () => {
     setBaseEnv();
     const env = process.env as Record<string, string | undefined>;
     env["NODE_ENV"] = "production";
@@ -262,7 +273,7 @@ describe("maintainer route", () => {
 
     expect(response.status).toBe(503);
     expect(Array.isArray(payload.issues)).toBe(true);
-    expect(payload.issues?.some((issue) => issue.includes("MAINTAINER_API_KEY"))).toBe(true);
+    expect(payload.issues?.some((issue) => issue.includes("RELAYER_API_KEY"))).toBe(true);
   });
 
   it("fails closed in production when allowlist contains insecure origins", async () => {
@@ -306,6 +317,56 @@ describe("maintainer route", () => {
 
     expect(response.status).toBe(401);
     expect(payload.error).toBe("Missing or invalid maintainer API key.");
+  });
+
+  it("accepts RELAYER_API_KEY as maintainer auth fallback", async () => {
+    setBaseEnv();
+    const env = process.env as Record<string, string | undefined>;
+    env["NODE_ENV"] = "production";
+    env["VERCEL_ENV"] = "production";
+    env["MAINTAINER_REQUIRE_AUTH"] = "true";
+    env["MAINTAINER_REQUIRE_DURABLE_LOCK"] = "true";
+    env["KV_REST_API_URL"] = "https://example.upstash.io";
+    env["KV_REST_API_TOKEN"] = "token";
+    delete env["MAINTAINER_API_KEY"];
+    env["RELAYER_API_KEY"] = "relayer-secret";
+
+    const { POST } = await loadRoute();
+    const response = await POST(new Request("https://app.example.com/api/maintainer", { method: "POST" }));
+    const payload = (await response.json()) as { error?: string };
+
+    expect(response.status).toBe(401);
+    expect(payload.error).toBe("Missing or invalid maintainer API key.");
+  });
+
+  it("accepts x-relayer-api-key header when maintainer auth uses relayer fallback", async () => {
+    setBaseEnv();
+    const env = process.env as Record<string, string | undefined>;
+    env["MAINTAINER_REQUIRE_AUTH"] = "true";
+    delete env["MAINTAINER_API_KEY"];
+    env["RELAYER_API_KEY"] = "relayer-secret";
+
+    rpcInvokeFunctionMock.mockImplementation(async (_hash: string, operation: string) => {
+      if (operation === "getLeafIndex") return intResult(0);
+      if (operation === "getLastRootLeafCount") return intResult(0);
+      if (operation === "getCurrentRoot") return emptyByteResult();
+      throw new Error(`Unexpected operation: ${operation}`);
+    });
+
+    const { POST } = await loadRoute();
+    const response = await POST(
+      new Request("https://app.example.com/api/maintainer", {
+        method: "POST",
+        headers: {
+          "x-relayer-api-key": "relayer-secret",
+        },
+      }),
+    );
+    const payload = (await response.json()) as { success?: boolean; message?: string; error?: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(payload.message).toBe("Tree is already up to date.");
   });
 
   it("rejects oversized cache gaps beyond MAINTAINER_MAX_SYNC_LEAVES", async () => {

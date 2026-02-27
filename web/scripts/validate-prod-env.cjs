@@ -130,7 +130,9 @@ function run() {
   const relayerRequireOriginAllowlist = parseBoolean(read(env, "RELAYER_REQUIRE_ORIGIN_ALLOWLIST"), true);
   const relayerRequireDurableGuards = parseBoolean(read(env, "RELAYER_REQUIRE_DURABLE_GUARDS"), false);
   const relayerRequireStrongVerifier = parseBoolean(read(env, "RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER"), true);
+  const relayerAllowInsecureRpc = parseBoolean(read(env, "RELAYER_ALLOW_INSECURE_RPC"), false);
   const relayerExpectedVerifierHash = read(env, "RELAYER_EXPECTED_VERIFIER_HASH");
+  const relayerApiKey = read(env, "RELAYER_API_KEY");
   const relayerOrigins = csv(env, "RELAYER_ALLOWED_ORIGINS");
   const tokenAllowlist = parseTokenAllowlist(csv(env, "ALLOWED_TOKEN_HASHES"));
 
@@ -141,10 +143,11 @@ function run() {
   const enableMaintainerTools = parseBoolean(read(env, "NEXT_PUBLIC_ENABLE_MAINTAINER_TOOLS"), false);
 
   const maintainerVaultHash = read(env, "MAINTAINER_VAULT_HASH") || vaultHash;
-  const maintainerWif = read(env, "MAINTAINER_WIF");
+  const maintainerWif = read(env, "MAINTAINER_WIF") || relayerWif;
   const maintainerRequireAuth = parseBoolean(read(env, "MAINTAINER_REQUIRE_AUTH"), true);
-  const maintainerApiKey = read(env, "MAINTAINER_API_KEY");
+  const maintainerApiKey = read(env, "MAINTAINER_API_KEY") || relayerApiKey;
   const maintainerRequireDurableLock = parseBoolean(read(env, "MAINTAINER_REQUIRE_DURABLE_LOCK"), true);
+  const maintainerAllowInsecureRpc = parseBoolean(read(env, "MAINTAINER_ALLOW_INSECURE_RPC"), relayerAllowInsecureRpc);
   const maintainerRequireOriginAllowlist = parseBoolean(read(env, "MAINTAINER_REQUIRE_ORIGIN_ALLOWLIST"), false);
   const maintainerOrigins = csv(env, "MAINTAINER_ALLOWED_ORIGINS");
   const mergedMaintainerOrigins = maintainerOrigins.length > 0 ? maintainerOrigins : relayerOrigins;
@@ -154,8 +157,10 @@ function run() {
 
   addCheck(
     "RPC_URL is configured with secure transport",
-    rpcUrl.length > 0 && isSecureRpc(rpcUrl),
-    rpcUrl.length === 0 ? "missing" : "must start with https:// or wss://",
+    rpcUrl.length > 0 && (isSecureRpc(rpcUrl) || relayerAllowInsecureRpc || maintainerAllowInsecureRpc),
+    rpcUrl.length === 0
+      ? "missing"
+      : "must start with https:// or wss:// (or set RELAYER_ALLOW_INSECURE_RPC/MAINTAINER_ALLOW_INSECURE_RPC=true)",
   );
 
   addCheck(
@@ -223,7 +228,11 @@ function run() {
     maintainerVaultHash.length === 0 ? "missing" : "must match 0x + 40 hex chars",
   );
 
-  addCheck("MAINTAINER_WIF is configured", maintainerWif.length > 0, "missing");
+  addCheck(
+    "Maintainer signer is configured via RELAYER_WIF (MAINTAINER_WIF optional override)",
+    maintainerWif.length > 0,
+    "missing",
+  );
 
   addCheck(
     "MAINTAINER_REQUIRE_AUTH=true",
@@ -231,7 +240,11 @@ function run() {
     `current=${read(env, "MAINTAINER_REQUIRE_AUTH") || "<default:true>"}`,
   );
 
-  addCheck("MAINTAINER_API_KEY is configured", maintainerApiKey.length > 0, "missing");
+  addCheck(
+    "Maintainer auth secret is configured via RELAYER_API_KEY (MAINTAINER_API_KEY optional override)",
+    maintainerApiKey.length > 0,
+    "missing",
+  );
 
   addCheck(
     "MAINTAINER_REQUIRE_DURABLE_LOCK=true",

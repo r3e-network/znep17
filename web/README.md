@@ -30,12 +30,22 @@ RELAYER_REQUIRE_AUTH=false
 RELAYER_REQUIRE_ORIGIN_ALLOWLIST=true
 RELAYER_REQUIRE_DURABLE_GUARDS=false
 RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER=true
+# Optional legacy HTTP testnet seeds (not recommended):
+# RPC_URL=http://seed2t5.neo.org:20332
+# RELAYER_ALLOW_INSECURE_RPC=true
 # Tree updater (recommended: cron/server-to-server only)
 MAINTAINER_VAULT_HASH=0xYourVaultContractHash
-MAINTAINER_WIF=MaintainerWifWithGas
 MAINTAINER_REQUIRE_AUTH=true
-MAINTAINER_API_KEY=another-strong-random-secret
+# By default maintainer uses existing relayer secrets:
+# - signer: RELAYER_WIF
+# - auth secret: RELAYER_API_KEY
+# Optional overrides (only if you want dedicated maintainer credentials):
+# MAINTAINER_WIF=MaintainerWifWithGas
+# MAINTAINER_API_KEY=another-strong-random-secret
 MAINTAINER_REQUIRE_DURABLE_LOCK=false
+# Optional maintainer RPC override + legacy HTTP allowance:
+# MAINTAINER_RPC_URL=http://seed5t5.neo.org:20332
+# MAINTAINER_ALLOW_INSECURE_RPC=true
 # Optional: override tree-update proving artifact locations
 # MAINTAINER_TREE_UPDATE_WASM_PATH=/absolute/path/to/tree_update.wasm
 # MAINTAINER_TREE_UPDATE_ZKEY_PATH=/absolute/path/to/tree_update_final.zkey
@@ -43,7 +53,7 @@ MAINTAINER_REQUIRE_DURABLE_LOCK=false
 # RELAYER_EXPECTED_VERIFIER_HASH=0xYourVerifierContractHash
 # Optional frontend deployment tuning:
 # NEXT_PUBLIC_BASE_PATH=/app
-# NEXT_PUBLIC_EXPLORER_TX_BASE_URL=https://testnet.ndora.org/transaction/
+# NEXT_PUBLIC_EXPLORER_TX_BASE_URL=https://testnet.neotube.io/transaction/
 # Optional (defaults to false for safety):
 # NEXT_PUBLIC_ALLOW_CUSTOM_VAULT_HASH=false
 # Optional proof endpoint bootstrap cap (protects server from oversized cold rebuilds):
@@ -89,9 +99,9 @@ npm run dev
 10. Keep `NEXT_PUBLIC_ENABLE_MAINTAINER_TOOLS=false` in public deployments.
 11. Configure maintainer endpoint hardening:
    - `MAINTAINER_REQUIRE_AUTH=true`
-   - `MAINTAINER_API_KEY=<strong secret>`
+   - `RELAYER_API_KEY=<strong secret>` (or optional `MAINTAINER_API_KEY` override)
    - `MAINTAINER_REQUIRE_DURABLE_LOCK=true` with `KV_REST_API_URL` + `KV_REST_API_TOKEN`
-12. Do not expose `MAINTAINER_API_KEY` to browser clients; invoke `/api/maintainer` from cron/server jobs.
+12. Do not expose maintainer/relayer API keys to browser clients; invoke `/api/maintainer` from cron/server jobs.
 13. Configure maintainer state backend:
    - `SUPABASE_URL` (or `NEXT_PUBLIC_SUPABASE_URL`)
    - `SUPABASE_SERVICE_ROLE_KEY`

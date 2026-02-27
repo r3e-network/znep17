@@ -42,6 +42,7 @@ type MaintainerConfig = {
   chainFetchConcurrency: number;
   kvRestApiUrl: string;
   kvRestApiToken: string;
+  allowInsecureRpc: boolean;
 };
 
 type RpcStackItem = {
@@ -129,6 +130,10 @@ function readMaintainerCredential(headers: Headers): string | null {
   const headerKey = headers.get("x-maintainer-api-key");
   if (headerKey && headerKey.trim().length > 0) {
     return headerKey.trim();
+  }
+  const relayerHeaderKey = headers.get("x-relayer-api-key");
+  if (relayerHeaderKey && relayerHeaderKey.trim().length > 0) {
+    return relayerHeaderKey.trim();
   }
   return parseBearerToken(headers.get("authorization"));
 }
@@ -595,8 +600,8 @@ function parseConfig(): MaintainerConfig {
     process.env.VAULT_HASH ||
     process.env.NEXT_PUBLIC_VAULT_HASH ||
     "";
-  const maintainerWif = process.env.MAINTAINER_WIF || "";
-  const maintainerApiKey = process.env.MAINTAINER_API_KEY || "";
+  const maintainerWif = process.env.MAINTAINER_WIF || process.env.RELAYER_WIF || "";
+  const maintainerApiKey = process.env.MAINTAINER_API_KEY || process.env.RELAYER_API_KEY || "";
   const treeUpdateWasmPath =
     process.env.MAINTAINER_TREE_UPDATE_WASM_PATH || path.join(process.cwd(), "public", "zk", "tree_update.wasm");
   const treeUpdateZkeyPath =
@@ -604,6 +609,10 @@ function parseConfig(): MaintainerConfig {
   const requireAuth = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_AUTH, isProduction);
   const requireOriginAllowlist = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_ORIGIN_ALLOWLIST, false);
   const requireDurableLock = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_DURABLE_LOCK, isProduction);
+  const allowInsecureRpc = parseBooleanEnv(
+    process.env.MAINTAINER_ALLOW_INSECURE_RPC,
+    parseBooleanEnv(process.env.RELAYER_ALLOW_INSECURE_RPC, false),
+  );
   const allowedOriginsRaw = process.env.MAINTAINER_ALLOWED_ORIGINS || process.env.RELAYER_ALLOWED_ORIGINS || "";
   const originAllowlist = parseOriginAllowlist(allowedOriginsRaw);
   const maxSyncLeaves = parsePositiveIntEnv(process.env.MAINTAINER_MAX_SYNC_LEAVES, DEFAULT_MAX_SYNC_LEAVES);
@@ -637,13 +646,14 @@ function parseConfig(): MaintainerConfig {
     chainFetchConcurrency,
     kvRestApiUrl,
     kvRestApiToken,
+    allowInsecureRpc,
   };
 }
 
 function validateConfig(config: MaintainerConfig): string[] {
   const issues: string[] = [];
 
-  if (!hasSecureRpcTransport(config.rpcUrl)) {
+  if (!config.allowInsecureRpc && !hasSecureRpcTransport(config.rpcUrl)) {
     issues.push("MAINTAINER_RPC_URL/RPC_URL must use https:// or wss://.");
   }
 
@@ -658,7 +668,7 @@ function validateConfig(config: MaintainerConfig): string[] {
   }
 
   if (!config.maintainerWif) {
-    issues.push("MAINTAINER_WIF is required.");
+    issues.push("RELAYER_WIF is required (MAINTAINER_WIF is optional override).");
   } else {
     try {
       void new wallet.Account(config.maintainerWif);
@@ -675,7 +685,9 @@ function validateConfig(config: MaintainerConfig): string[] {
   }
 
   if (config.requireAuth && !config.maintainerApiKey) {
-    issues.push("MAINTAINER_API_KEY is required when MAINTAINER_REQUIRE_AUTH=true.");
+    issues.push(
+      "RELAYER_API_KEY is required when MAINTAINER_REQUIRE_AUTH=true (MAINTAINER_API_KEY is optional override).",
+    );
   }
 
   if (config.requireOriginAllowlist && !config.originAllowlist) {
