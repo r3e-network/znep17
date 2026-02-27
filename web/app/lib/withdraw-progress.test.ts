@@ -42,7 +42,16 @@ describe("withdraw progress helpers", () => {
       "Commitment is not yet included in a finalized Merkle root. Retry shortly.",
     );
     expect(copy.message).toContain("Merkle proof lookup failed");
-    expect(copy.hint).toContain("10-60 seconds");
+    expect(copy.hint).toContain("auto-retries");
+  });
+
+  it("surfaces timeout guidance when finalization retries are exhausted", () => {
+    const copy = getWithdrawFailureCopy(
+      "fetch_merkle",
+      "Commitment is still not finalized after 10 minutes. Maintainer may be stalled; retry later.",
+    );
+    expect(copy.message).toContain("Merkle proof lookup failed");
+    expect(copy.hint).toContain("timed out");
   });
 
   it("surfaces proof rate-limit guidance for fetch-merkle failures", () => {

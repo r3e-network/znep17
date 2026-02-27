@@ -73,7 +73,13 @@ export function getWithdrawFailureCopy(
   ) {
     return {
       message: `${stepCopy.errorPrefix}: ${normalizedReason}`,
-      hint: "Your deposit is confirmed but not finalized for withdrawal yet. Wait for maintainer root update (often 10-60 seconds), then retry.",
+      hint: "Your deposit is confirmed but not finalized for withdrawal yet. zNEP-17 auto-retries while the maintainer publishes the next root.",
+    };
+  }
+  if (step === "fetch_merkle" && normalizedReasonLower.includes("still not finalized after")) {
+    return {
+      message: `${stepCopy.errorPrefix}: ${normalizedReason}`,
+      hint: "Automatic retries timed out. Maintainer may be stalled; wait for root updates and retry later.",
     };
   }
   if (step === "fetch_merkle" && normalizedReasonLower.includes("too many proof requests")) {

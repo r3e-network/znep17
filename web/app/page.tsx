@@ -8,6 +8,11 @@ import { summarizeRelayConfigFailure } from "./lib/relay-config";
 import { getWalletConnectErrorMessage } from "./lib/wallet-errors";
 import { buildAutofillPrivacyTicket, formatPrivacyTicket, parsePrivacyTicket } from "./lib/privacy-ticket";
 import {
+  getMerkleProofRetryDecision,
+  getMerkleProofRetryStatus,
+  MERKLE_FINALIZATION_MAX_WAIT_MS,
+} from "./lib/withdraw-retry";
+import {
   WITHDRAW_STEP_SEQUENCE,
   getWithdrawFailureCopy,
   getWithdrawStepCopy,
@@ -66,9 +71,7 @@ const TOKEN_DEFAULT = "0xd2a4cff31913016155e38e474a2c06d08be276cf";
 const TOKEN_GAS = "0xd2a4cff31913016155e38e474a2c06d08be276cf";
 const TOKEN_NEO = "0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5";
 const RELAYER_FEE_FIXED8 = "100000000";
-const MERKLE_FINALIZATION_RETRY_ATTEMPTS = 4;
-const MERKLE_FINALIZATION_RETRY_DELAY_MS = 12000;
-const PROOF_RATE_LIMIT_RETRY_DELAY_MS = 65000;
+const MERKLE_FINALIZATION_MAX_WAIT_MINUTES = Math.floor(MERKLE_FINALIZATION_MAX_WAIT_MS / 60_000);
 const LEGACY_PENDING_KEY = "znep17_has_pending";
 const LEGACY_LAST_SECRET_KEY = "znep17_last_secret";
 const LEGACY_LAST_NULLIFIER_KEY = "znep17_last_nullifier";
@@ -307,6 +310,7 @@ export default function Home() {
   const [withdrawFailedStep, setWithdrawFailedStep] = useState<WithdrawStep | null>(null);
   const [withdrawCompleted, setWithdrawCompleted] = useState(false);
   const [withdrawFailureHint, setWithdrawFailureHint] = useState("");
+  const [withdrawStatusHint, setWithdrawStatusHint] = useState("");
   const [secretHex, setSecretHex] = useState("");
   const [nullifierPrivHex, setNullifierPrivHex] = useState("");
   const [ticketAmount, setTicketAmount] = useState("");
@@ -600,6 +604,7 @@ export default function Home() {
   const handleWithdraw = async () => {
     setWithdrawFailedStep(null);
     setWithdrawFailureHint("");
+    setWithdrawStatusHint("");
     setWithdrawCompleted(false);
 
     if (!tokenHash || !amount || !recipient || !relayer || !secretHex || !nullifierPrivHex) {
@@ -659,26 +664,26 @@ export default function Home() {
 
       currentStep = "fetch_merkle";
       setWithdrawActiveStep(currentStep);
+      setWithdrawStatusHint("Checking commitment finalization and building Merkle proof...");
       let merkleProof: MerkleProofResponse | null = null;
-      let waitedForProofRateLimit = false;
-      for (let attempt = 0; attempt < MERKLE_FINALIZATION_RETRY_ATTEMPTS; attempt++) {
+      const merkleFetchStartedAt = Date.now();
+      while (!merkleProof) {
         try {
           merkleProof = await fetchMerkleProofFromRelay(noteArtifacts.commitmentHex);
-          break;
+          setWithdrawStatusHint("");
         } catch (error: unknown) {
-          const message = getErrorMessage(error, "Failed to fetch Merkle proof from relay").toLowerCase();
-          const isFinalizationDelay = message.includes("not yet included in a finalized merkle root");
-          const isProofRateLimited = message.includes("too many proof requests");
-          if (isProofRateLimited && !waitedForProofRateLimit) {
-            waitedForProofRateLimit = true;
-            await sleep(PROOF_RATE_LIMIT_RETRY_DELAY_MS);
-            attempt -= 1;
-            continue;
-          }
-          if (!isFinalizationDelay || attempt === MERKLE_FINALIZATION_RETRY_ATTEMPTS - 1) {
+          const message = getErrorMessage(error, "Failed to fetch Merkle proof from relay");
+          const retryDecision = getMerkleProofRetryDecision(message, Date.now() - merkleFetchStartedAt);
+          if (!retryDecision.retry || typeof retryDecision.delayMs !== "number") {
+            if (retryDecision.errorMessage) {
+              throw new Error(retryDecision.errorMessage);
+            }
             throw error;
           }
-          await sleep(MERKLE_FINALIZATION_RETRY_DELAY_MS);
+          setWithdrawStatusHint(
+            getMerkleProofRetryStatus(message, retryDecision.delayMs, Date.now() - merkleFetchStartedAt),
+          );
+          await sleep(retryDecision.delayMs);
         }
       }
       if (!merkleProof) {
@@ -688,6 +693,7 @@ export default function Home() {
 
       currentStep = "generate_proof";
       setWithdrawActiveStep(currentStep);
+      setWithdrawStatusHint("Generating zero-knowledge proof locally in your browser. Keep this tab open.");
 
       const input = {
         root: merkleProof.rootDecimal,
@@ -728,6 +734,7 @@ export default function Home() {
 
       currentStep = "submit_to_relayer";
       setWithdrawActiveStep(currentStep);
+      setWithdrawStatusHint("Proof generated. Submitting to relayer and waiting for on-chain transaction.");
 
       const requestBody: Record<string, unknown> = {
         tokenHash: assetScriptHash,
@@ -767,11 +774,13 @@ export default function Home() {
       setWithdrawCompleted(true);
       setWithdrawFailedStep(null);
       setWithdrawFailureHint("");
+      setWithdrawStatusHint("");
     } catch (err: unknown) {
       const baseMessage = getErrorMessage(err, "Withdraw failed");
       const failureCopy = getWithdrawFailureCopy(currentStep, baseMessage);
       setWithdrawFailedStep(currentStep);
       setWithdrawFailureHint(failureCopy.hint);
+      setWithdrawStatusHint("");
       setError(failureCopy.message);
     } finally {
       setWithdrawActiveStep(null);
@@ -1122,6 +1131,8 @@ export default function Home() {
                 <div className="mt-3 rounded-lg border border-blue-900/50 bg-blue-950/20 p-3">
                   <p className="mb-2 text-xs text-blue-200/80">
                     Expected normal withdrawal time: <strong>~15-30 seconds</strong> once your deposit is finalized in a Merkle root.
+                    {" "}If finalization is delayed, zNEP-17 retries automatically for up to{" "}
+                    <strong>{MERKLE_FINALIZATION_MAX_WAIT_MINUTES} minutes</strong>.
                   </p>
                   <p
                     className={`text-sm ${
@@ -1136,6 +1147,11 @@ export default function Home() {
                           ? getWithdrawStepCopy(withdrawActiveStep).progress
                           : "Preparing withdrawal..."}
                   </p>
+                  {loading && withdrawStatusHint && (
+                    <p className="mt-1 rounded border border-blue-900/50 bg-blue-950/30 px-2 py-1 text-xs text-blue-200">
+                      {withdrawStatusHint}
+                    </p>
+                  )}
                   <ol className="mt-2 space-y-1">
                     {WITHDRAW_STEP_SEQUENCE.map((step) => {
                       const visualState = getWithdrawStepVisualState(
