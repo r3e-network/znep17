@@ -933,6 +933,8 @@ export async function GET(req: Request) {
     const vaultScriptHash = normalizeHash160(VAULT_HASH, "VAULT_HASH");
     const url = new URL(req.url);
     const proofCommitment = url.searchParams.get("proof");
+    const proofMode = (url.searchParams.get("mode") || "").trim().toLowerCase();
+    const softProofMode = proofMode === "soft";
 
     if (proofCommitment) {
       const ip = getClientIpFromHeaders(req.headers, {
@@ -983,8 +985,21 @@ export async function GET(req: Request) {
         );
       }
       if (commitmentIndex >= lastRootLeafCount) {
+        const message = "Commitment is not yet included in a finalized Merkle root. Retry shortly.";
+        if (softProofMode) {
+          return NextResponse.json(
+            {
+              pendingFinalization: true,
+              error: message,
+              commitmentIndex,
+              lastRootLeafCount,
+              leafCount,
+            },
+            { headers: { "Cache-Control": "no-store" } },
+          );
+        }
         return NextResponse.json(
-          { error: "Commitment is not yet included in a finalized Merkle root. Retry shortly." },
+          { error: message },
           { status: 409, headers: { "Cache-Control": "no-store" } },
         );
       }

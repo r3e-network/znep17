@@ -275,12 +275,12 @@ async function deriveNoteArtifacts(
 }
 
 async function fetchMerkleProofFromRelay(commitmentHex: string): Promise<MerkleProofResponse> {
-  const res = await fetch(`/api/relay?proof=${encodeURIComponent(commitmentHex)}`, {
+  const res = await fetch(`/api/relay?proof=${encodeURIComponent(commitmentHex)}&mode=soft`, {
     method: "GET",
     cache: "no-store",
     headers: buildRelayHeaders(),
   });
-  const data = (await res.json()) as MerkleProofResponse & { error?: string };
+  const data = (await res.json()) as MerkleProofResponse & { error?: string; pendingFinalization?: boolean };
   if (!res.ok || !Array.isArray(data.pathElements)) {
     throw new Error((data as { error?: string }).error || "Failed to fetch Merkle proof from relay");
   }
