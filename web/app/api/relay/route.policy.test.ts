@@ -112,6 +112,30 @@ describe("relay GET proof policy", () => {
     expect(payload.error).toBe("Missing or invalid relayer API key.");
   });
 
+  it("allows same-origin POST requests even when allowlist is stale", async () => {
+    setBaseEnv();
+    const env = process.env as Record<string, string | undefined>;
+    env["RELAYER_REQUIRE_ORIGIN_ALLOWLIST"] = "true";
+    env["RELAYER_ALLOWED_ORIGINS"] = "https://app.example.com";
+    env["RELAYER_REQUIRE_AUTH"] = "false";
+
+    const { POST } = await loadRouteModule();
+    const req = new Request("https://relay.example.com/api/relay", {
+      method: "POST",
+      headers: {
+        origin: "https://relay.example.com",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+
+    const res = await POST(req);
+    const payload = (await res.json()) as { error?: string };
+
+    expect(res.status).toBe(400);
+    expect(payload.error).toBe("Invalid request fields.");
+  });
+
 
   it("fails configuration when RPC_URL is insecure in production", async () => {
     setBaseEnv();
@@ -142,6 +166,38 @@ describe("relay GET proof policy", () => {
     expect(payload.configured).toBe(false);
     expect(Array.isArray(payload.issues)).toBe(true);
     expect(payload.issues?.some((issue) => issue.includes("RPC_URL must use https://"))).toBe(true);
+  });
+
+  it("allows insecure RPC when RELAYER_ALLOW_INSECURE_RPC=true", async () => {
+    setBaseEnv();
+    const env = process.env as Record<string, string | undefined>;
+    env["NODE_ENV"] = "production";
+    env["VERCEL_ENV"] = "production";
+    env["RPC_URL"] = "http://127.0.0.1:1";
+    env["RELAYER_ALLOW_INSECURE_RPC"] = "true";
+    env["RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER"] = "true";
+    env["RELAYER_EXPECTED_VERIFIER_HASH"] = `0x${"55".repeat(20)}`;
+    env["RELAYER_REQUIRE_ORIGIN_ALLOWLIST"] = "true";
+    env["RELAYER_ALLOWED_ORIGINS"] = "https://app.example.com";
+    env["ALLOWED_TOKEN_HASHES"] = `0x${"33".repeat(20)}`;
+    env["RELAYER_REQUIRE_DURABLE_GUARDS"] = "true";
+    env["KV_REST_API_URL"] = "https://example.upstash.io";
+    env["KV_REST_API_TOKEN"] = "token";
+    env["RELAYER_REQUIRE_AUTH"] = "false";
+
+    const { GET } = await loadRouteModule();
+    const req = new Request("https://relay.example.com/api/relay", {
+      method: "GET",
+      headers: { origin: "https://app.example.com" },
+    });
+
+    const res = await GET(req);
+    const payload = (await res.json()) as { configured?: boolean; issues?: string[]; error?: string };
+
+    expect(res.status).toBe(503);
+    expect(payload.configured).toBe(false);
+    expect(Array.isArray(payload.issues)).toBe(false);
+    expect(payload.error).toBe("Failed to initialize relayer config.");
   });
 
   it("sanitizes runtime initialization errors in production", async () => {

@@ -48,6 +48,7 @@ export function getWithdrawFailureCopy(
   hint: string;
 } {
   const normalizedReason = reason.trim().length > 0 ? reason.trim() : "Unknown error.";
+  const normalizedReasonLower = normalizedReason.toLowerCase();
   if (!step) {
     return {
       message: `Withdraw failed: ${normalizedReason}`,
@@ -56,6 +57,12 @@ export function getWithdrawFailureCopy(
   }
 
   const stepCopy = getWithdrawStepCopy(step);
+  if (step === "fetch_merkle" && normalizedReasonLower.includes("origin not allowed")) {
+    return {
+      message: `${stepCopy.errorPrefix}: ${normalizedReason}`,
+      hint: "Relayer blocked this website origin. Add your site origin to RELAYER_ALLOWED_ORIGINS (and MAINTAINER_ALLOWED_ORIGINS), then retry.",
+    };
+  }
   return {
     message: `${stepCopy.errorPrefix}: ${normalizedReason}`,
     hint: stepCopy.hint,

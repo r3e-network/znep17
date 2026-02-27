@@ -79,6 +79,7 @@ const RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER = parseBooleanEnv(
   process.env.RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER,
   IS_PRODUCTION,
 );
+const RELAYER_ALLOW_INSECURE_RPC = parseBooleanEnv(process.env.RELAYER_ALLOW_INSECURE_RPC, false);
 const RELAYER_TRUST_PROXY_HEADERS = parseBooleanEnv(
   process.env.RELAYER_TRUST_PROXY_HEADERS,
   process.env.VERCEL === "1",
@@ -173,7 +174,7 @@ function hasInsecureOriginRule(allowlist: NonNullable<typeof originAllowlist>): 
 function validateRelayConfig(): string[] {
   const issues: string[] = [];
 
-  if (!hasSecureRpcTransport(RPC_URL)) {
+  if (!RELAYER_ALLOW_INSECURE_RPC && !hasSecureRpcTransport(RPC_URL)) {
     issues.push("RPC_URL must use https:// or wss://.");
   }
 
@@ -318,11 +319,51 @@ function configIssueResponse(statusCode = 503): NextResponse | null {
   );
 }
 
+function isOriginAuthorized(headers: Headers, requestUrl: string): boolean {
+  if (isOriginAllowed(headers, originAllowlist)) {
+    return true;
+  }
+
+  const originHeader = headers.get("origin");
+  if (!originHeader) {
+    return false;
+  }
+
+  try {
+    const requestOrigin = new URL(requestUrl).origin;
+    const callerOrigin = new URL(originHeader).origin;
+    return callerOrigin === requestOrigin;
+  } catch {
+    return false;
+  }
+}
+
 function exposeErrorMessage(error: unknown, fallback: string): string {
+  const rawMessage = error instanceof Error ? error.message : "";
+  const normalized = rawMessage.toLowerCase();
+
+  if (
+    normalized.includes("called contract") &&
+    normalized.includes("not found")
+  ) {
+    return "Vault contract not found on configured RPC. Check VAULT_HASH and RPC_URL.";
+  }
+  if (normalized.includes("unknown contract")) {
+    return "Vault contract not found on configured RPC. Check VAULT_HASH and RPC_URL.";
+  }
+  if (
+    normalized.includes("network request failed") ||
+    normalized.includes("fetch failed") ||
+    normalized.includes("timed out") ||
+    normalized.includes("timeout")
+  ) {
+    return "RPC endpoint is unreachable. Check RPC_URL and network connectivity.";
+  }
+
   if (IS_PRODUCTION) {
     return fallback;
   }
-  return error instanceof Error ? error.message : fallback;
+  return rawMessage || fallback;
 }
 
 function constantTimeEquals(left: string, right: string): boolean {
@@ -872,7 +913,7 @@ export async function GET(req: Request) {
       if (limited) {
         return NextResponse.json({ error: "Too many proof requests. Retry later." }, { status: 429 });
       }
-      if (!isOriginAllowed(req.headers, originAllowlist)) {
+      if (!isOriginAuthorized(req.headers, req.url)) {
         return NextResponse.json({ error: "Origin not allowed." }, { status: 403 });
       }
       if (RELAYER_REQUIRE_AUTH) {
@@ -1011,7 +1052,7 @@ export async function POST(req: Request) {
     if (limited) {
       return NextResponse.json({ error: "Too many requests. Retry later." }, { status: 429 });
     }
-    if (!isOriginAllowed(req.headers, originAllowlist)) {
+    if (!isOriginAuthorized(req.headers, req.url)) {
       return NextResponse.json({ error: "Origin not allowed." }, { status: 403 });
     }
     if (RELAYER_REQUIRE_AUTH) {

@@ -27,6 +27,12 @@ describe("withdraw progress helpers", () => {
     expect(copy.hint).toContain("Retry");
   });
 
+  it("surfaces origin allowlist guidance for fetch-merkle failures", () => {
+    const copy = getWithdrawFailureCopy("fetch_merkle", "Origin not allowed.");
+    expect(copy.message).toContain("Merkle proof lookup failed");
+    expect(copy.hint).toContain("RELAYER_ALLOWED_ORIGINS");
+  });
+
   it("marks previous steps complete while a later step is active", () => {
     const [fetchStep, proveStep, submitStep] = WITHDRAW_STEP_SEQUENCE;
 
