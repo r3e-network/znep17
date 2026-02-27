@@ -11,7 +11,7 @@ import { encodeBigIntToLeScalar, encodeGroth16ProofPayload } from "../relay/zk-e
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const HASH160_HEX_RE = /^(?:0x)?[0-9a-fA-F]{40}$/;
 const HEX32_RE = /^[0-9a-fA-F]{64}$/;
@@ -136,6 +136,11 @@ function readMaintainerCredential(headers: Headers): string | null {
     return relayerHeaderKey.trim();
   }
   return parseBearerToken(headers.get("authorization"));
+}
+
+function isVercelCronInvocation(headers: Headers): boolean {
+  const marker = headers.get("x-vercel-cron");
+  return typeof marker === "string" && marker.trim().length > 0;
 }
 
 function constantTimeEquals(left: string, right: string): boolean {
@@ -742,14 +747,20 @@ export async function POST(req: Request) {
       );
     }
 
-    if (config.requireOriginAllowlist && !isOriginAllowed(req.headers, config.originAllowlist)) {
-      return NextResponse.json({ error: "Origin not allowed." }, { status: 403 });
-    }
-
+    const credential = readMaintainerCredential(req.headers);
     if (config.requireAuth) {
-      const credential = readMaintainerCredential(req.headers);
       if (!credential || !constantTimeEquals(credential, config.maintainerApiKey)) {
         return NextResponse.json({ error: "Missing or invalid maintainer API key." }, { status: 401 });
+      }
+    }
+    if (config.requireOriginAllowlist && !isOriginAllowed(req.headers, config.originAllowlist)) {
+      const isTrustedCron =
+        isVercelCronInvocation(req.headers) &&
+        config.requireAuth &&
+        Boolean(credential) &&
+        constantTimeEquals(credential as string, config.maintainerApiKey);
+      if (!isTrustedCron) {
+        return NextResponse.json({ error: "Origin not allowed." }, { status: 403 });
       }
     }
 

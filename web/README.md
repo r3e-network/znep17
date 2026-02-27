@@ -102,6 +102,7 @@ npm run dev
    - `RELAYER_API_KEY=<strong secret>` (or optional `MAINTAINER_API_KEY` override)
    - `MAINTAINER_REQUIRE_DURABLE_LOCK=true` with `KV_REST_API_URL` + `KV_REST_API_TOKEN`
 12. Do not expose maintainer/relayer API keys to browser clients; invoke `/api/maintainer` from cron/server jobs.
+13. For Vercel Cron, set `CRON_SECRET` to the same value as the maintainer auth secret (`MAINTAINER_API_KEY` or `RELAYER_API_KEY`).
 13. Configure maintainer state backend:
    - `SUPABASE_URL` (or `NEXT_PUBLIC_SUPABASE_URL`)
    - `SUPABASE_SERVICE_ROLE_KEY`
@@ -118,6 +119,7 @@ The relayer and maintainer routes run in `runtime=nodejs` as dynamic API routes 
 4. Keep install/build commands aligned with `web/vercel.json`:
    - `npm ci`
    - `npm run build`
+5. Vercel Cron is configured in `web/vercel.json` to call `/api/maintainer` every minute.
 
 ### Production Env Checklist (Vercel)
 

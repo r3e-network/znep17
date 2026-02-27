@@ -369,6 +369,38 @@ describe("maintainer route", () => {
     expect(payload.message).toBe("Tree is already up to date.");
   });
 
+  it("allows authenticated vercel cron requests when origin allowlist is enabled", async () => {
+    setBaseEnv();
+    const env = process.env as Record<string, string | undefined>;
+    env["MAINTAINER_REQUIRE_AUTH"] = "true";
+    env["MAINTAINER_API_KEY"] = "expected-secret";
+    env["MAINTAINER_REQUIRE_ORIGIN_ALLOWLIST"] = "true";
+    env["MAINTAINER_ALLOWED_ORIGINS"] = "https://app.example.com";
+
+    rpcInvokeFunctionMock.mockImplementation(async (_hash: string, operation: string) => {
+      if (operation === "getLeafIndex") return intResult(0);
+      if (operation === "getLastRootLeafCount") return intResult(0);
+      if (operation === "getCurrentRoot") return emptyByteResult();
+      throw new Error(`Unexpected operation: ${operation}`);
+    });
+
+    const { POST } = await loadRoute();
+    const response = await POST(
+      new Request("https://app.example.com/api/maintainer", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer expected-secret",
+          "x-vercel-cron": "*/1 * * * *",
+        },
+      }),
+    );
+    const payload = (await response.json()) as { success?: boolean; message?: string; error?: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(payload.message).toBe("Tree is already up to date.");
+  });
+
   it("rejects oversized cache gaps beyond MAINTAINER_MAX_SYNC_LEAVES", async () => {
     setBaseEnv();
     const env = process.env as Record<string, string | undefined>;

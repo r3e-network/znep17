@@ -146,6 +146,7 @@ function run() {
   const maintainerWif = read(env, "MAINTAINER_WIF") || relayerWif;
   const maintainerRequireAuth = parseBoolean(read(env, "MAINTAINER_REQUIRE_AUTH"), true);
   const maintainerApiKey = read(env, "MAINTAINER_API_KEY") || relayerApiKey;
+  const cronSecret = read(env, "CRON_SECRET");
   const maintainerRequireDurableLock = parseBoolean(read(env, "MAINTAINER_REQUIRE_DURABLE_LOCK"), true);
   const maintainerAllowInsecureRpc = parseBoolean(read(env, "MAINTAINER_ALLOW_INSECURE_RPC"), relayerAllowInsecureRpc);
   const maintainerRequireOriginAllowlist = parseBoolean(read(env, "MAINTAINER_REQUIRE_ORIGIN_ALLOWLIST"), false);
@@ -273,6 +274,16 @@ function run() {
       mergedMaintainerOrigins.length === 0 ? "missing" : "contains non-https origin",
     );
   }
+
+  addAdvisory(
+    "CRON_SECRET matches maintainer auth secret for Vercel Cron",
+    cronSecret.length > 0 && maintainerApiKey.length > 0 && cronSecret === maintainerApiKey,
+    cronSecret.length === 0
+      ? "missing (recommended for automated /api/maintainer cron calls)"
+      : maintainerApiKey.length === 0
+        ? "maintainer auth secret missing"
+        : "CRON_SECRET should equal maintainer auth secret",
+  );
 
   const passed = checks.filter((check) => check.pass).length;
   const failedChecks = checks.filter((check) => !check.pass);
