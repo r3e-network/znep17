@@ -324,15 +324,26 @@ function isOriginAuthorized(headers: Headers, requestUrl: string): boolean {
     return true;
   }
 
-  const originHeader = headers.get("origin");
-  if (!originHeader) {
-    return false;
-  }
-
   try {
     const requestOrigin = new URL(requestUrl).origin;
-    const callerOrigin = new URL(originHeader).origin;
-    return callerOrigin === requestOrigin;
+
+    const originHeader = headers.get("origin");
+    if (originHeader) {
+      const callerOrigin = new URL(originHeader).origin;
+      if (callerOrigin === requestOrigin) {
+        return true;
+      }
+    }
+
+    const refererHeader = headers.get("referer");
+    if (refererHeader) {
+      const refererOrigin = new URL(refererHeader).origin;
+      if (refererOrigin === requestOrigin) {
+        return true;
+      }
+    }
+
+    return false;
   } catch {
     return false;
   }

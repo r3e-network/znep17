@@ -136,6 +136,28 @@ describe("relay GET proof policy", () => {
     expect(payload.error).toBe("Invalid request fields.");
   });
 
+  it("allows same-origin GET proof requests without origin when referer matches", async () => {
+    setBaseEnv();
+    const env = process.env as Record<string, string | undefined>;
+    env["RELAYER_REQUIRE_ORIGIN_ALLOWLIST"] = "true";
+    env["RELAYER_ALLOWED_ORIGINS"] = "https://app.example.com";
+    env["RELAYER_REQUIRE_AUTH"] = "false";
+
+    const { GET } = await loadRouteModule();
+    const req = new Request("https://relay.example.com/api/relay?proof=not-hex", {
+      method: "GET",
+      headers: {
+        referer: "https://relay.example.com/withdraw",
+      },
+    });
+
+    const res = await GET(req);
+    const payload = (await res.json()) as { error?: string };
+
+    expect(res.status).toBe(400);
+    expect(payload.error).toContain("proof commitment");
+  });
+
 
   it("fails configuration when RPC_URL is insecure in production", async () => {
     setBaseEnv();
