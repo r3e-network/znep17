@@ -29,7 +29,19 @@ const TREE_UPDATE_PUBLIC_INPUT_COUNT = 5;
 const TREE_UPDATE_PUBLIC_INPUTS_PACKED_BYTES = 160;
 const MAINTAINER_STATUS_TTL_MS = 60 * 60_000;
 const MAINTAINER_STATUS_KEY_PREFIX = "znep17:maintainer-status:";
+const MAINTAINER_QUEUE_KEY_PREFIX = "znep17:maintainer-queue:";
+const MAINTAINER_QUEUE_PENDING_KEY_PREFIX = "znep17:maintainer-queue-pending:";
+const DEFAULT_QUEUE_PENDING_TTL_MS = 20 * 60_000;
+const MAINTAINER_WORKER_EXECUTE_HEADER = "x-maintainer-worker-execute";
 const ALLOW_TEST_OVERRIDES = process.env.VITEST === "true";
+const MAINTAINER_ASYNC_QUEUE = parseBooleanEnv(
+  ALLOW_TEST_OVERRIDES ? process.env.MAINTAINER_ASYNC_QUEUE : undefined,
+  !ALLOW_TEST_OVERRIDES,
+);
+const MAINTAINER_QUEUE_PENDING_TTL_MS = parsePositiveIntEnv(
+  ALLOW_TEST_OVERRIDES ? process.env.MAINTAINER_QUEUE_PENDING_TTL_MS : undefined,
+  DEFAULT_QUEUE_PENDING_TTL_MS,
+);
 
 type GuardStoreMode = "memory" | "durable";
 
@@ -56,13 +68,20 @@ type MaintainerConfig = {
 };
 
 type MaintainerStatusStage =
+  | "queued"
   | "starting"
   | "syncing_leaves"
   | "proof_generation"
   | "submitting_root_update"
   | "completed";
 
-type MaintainerStatusState = "running" | "up_to_date" | "success" | "failed";
+type MaintainerStatusState = "queued" | "running" | "up_to_date" | "success" | "failed";
+
+type MaintainerQueueJob = {
+  vaultHash: string;
+  enqueuedAt: string;
+  source: string;
+};
 
 type MaintainerStatusSnapshot = {
   state: MaintainerStatusState;
@@ -677,6 +696,73 @@ function getMaintainerStatusKey(vaultHash: string): string {
   return `${MAINTAINER_STATUS_KEY_PREFIX}${vaultHash}`;
 }
 
+function getMaintainerQueueKey(vaultHash: string): string {
+  return `${MAINTAINER_QUEUE_KEY_PREFIX}${vaultHash}`;
+}
+
+function getMaintainerQueuePendingKey(vaultHash: string): string {
+  return `${MAINTAINER_QUEUE_PENDING_KEY_PREFIX}${vaultHash}`;
+}
+
+function isWorkerExecutionRequest(headers: Headers): boolean {
+  const raw = headers.get(MAINTAINER_WORKER_EXECUTE_HEADER);
+  if (!raw) return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function getRequestSource(req: Request): string {
+  const origin = req.headers.get("origin") || "";
+  if (origin.trim().length > 0) return origin.trim();
+  const referer = req.headers.get("referer") || "";
+  if (referer.trim().length > 0) return referer.trim();
+  try {
+    return new URL(req.url).origin;
+  } catch {
+    return "unknown";
+  }
+}
+
+async function enqueueMaintainerJob(
+  redisClient: Redis | null,
+  vaultHash: string,
+  source: string,
+): Promise<boolean> {
+  if (!redisClient) {
+    throw new Error("Durable queue is not configured.");
+  }
+
+  const pendingKey = getMaintainerQueuePendingKey(vaultHash);
+  const pendingResult = await redisClient.set(pendingKey, Date.now().toString(), {
+    nx: true,
+    px: MAINTAINER_QUEUE_PENDING_TTL_MS,
+  });
+  if (pendingResult !== "OK") {
+    return false;
+  }
+
+  const queueKey = getMaintainerQueueKey(vaultHash);
+  const job: MaintainerQueueJob = {
+    vaultHash,
+    enqueuedAt: new Date().toISOString(),
+    source,
+  };
+  try {
+    await redisClient.rpush(queueKey, JSON.stringify(job));
+    return true;
+  } catch (error: unknown) {
+    try {
+      await redisClient.del(pendingKey);
+    } catch (cleanupError: unknown) {
+      console.error(
+        "Failed to clean queue pending key:",
+        cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+      );
+    }
+    throw error;
+  }
+}
+
 async function publishMaintainerStatus(
   config: MaintainerConfig | null,
   redisClient: Redis | null,
@@ -851,6 +937,10 @@ function validateConfig(config: MaintainerConfig): string[] {
     issues.push("Durable lock storage is required. Configure KV_REST_API_URL and KV_REST_API_TOKEN.");
   }
 
+  if (MAINTAINER_ASYNC_QUEUE && config.guardStoreMode !== "durable") {
+    issues.push("MAINTAINER_ASYNC_QUEUE requires KV_REST_API_URL and KV_REST_API_TOKEN.");
+  }
+
   if (config.isProduction && !config.requireAuth) {
     issues.push("MAINTAINER_REQUIRE_AUTH must be true in production.");
   }
@@ -887,6 +977,7 @@ export async function POST(req: Request) {
   let statusStage: MaintainerStatusStage = "starting";
   let runId: string | null = null;
   let runStartedAt = 0;
+  let queuedResponseSent = false;
 
   try {
     config = parseConfig();
@@ -899,12 +990,17 @@ export async function POST(req: Request) {
     }
 
     const credential = readMaintainerCredential(req.headers);
+    const workerExecution = isWorkerExecutionRequest(req.headers);
     if (config.requireAuth) {
       if (!credential || !constantTimeEquals(credential, config.maintainerApiKey)) {
         return NextResponse.json({ error: "Missing or invalid maintainer API key." }, { status: 401 });
       }
     }
-    if (config.requireOriginAllowlist && !isOriginAuthorized(req.headers, req.url, config.originAllowlist)) {
+    if (
+      config.requireOriginAllowlist &&
+      !workerExecution &&
+      !isOriginAuthorized(req.headers, req.url, config.originAllowlist)
+    ) {
       const isTrustedCron =
         isVercelCronInvocation(req.headers) &&
         config.requireAuth &&
@@ -919,6 +1015,31 @@ export async function POST(req: Request) {
     void getSupabaseAdminClient();
 
     redisClient = createRedisClient(config);
+    if (MAINTAINER_ASYNC_QUEUE && !workerExecution) {
+      const nowIso = new Date().toISOString();
+      runStartedAt = Date.now();
+      runId = `${runStartedAt.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const queued = await enqueueMaintainerJob(redisClient, config.vaultHash, getRequestSource(req));
+      queuedResponseSent = true;
+      statusStage = "queued";
+      await publishMaintainerStatus(config, redisClient, {
+        state: "queued",
+        stage: "queued",
+        runId,
+        startedAt: nowIso,
+        updatedAt: nowIso,
+      });
+
+      return NextResponse.json(
+        {
+          success: true,
+          queued,
+          message: queued ? "Maintainer update queued." : "Maintainer update already queued.",
+        },
+        { status: 202 },
+      );
+    }
+
     lockKey = `znep17:maintainer-lock:${config.vaultHash}`;
     lockHeld = await acquireRunLock(config, lockKey, redisClient);
     if (!lockHeld) {
@@ -1160,16 +1281,18 @@ export async function POST(req: Request) {
     const isProduction = config?.isProduction ?? false;
     console.error("Maintainer Error:", error instanceof Error ? error.message : String(error));
     const finishedAt = new Date().toISOString();
-    await publishMaintainerStatus(config, redisClient, {
-      state: "failed",
-      stage: statusStage,
-      runId: runId || undefined,
-      startedAt: runStartedAt > 0 ? new Date(runStartedAt).toISOString() : undefined,
-      updatedAt: finishedAt,
-      finishedAt,
-      durationMs: runStartedAt > 0 ? Date.now() - runStartedAt : undefined,
-      error: toMaintainerStatusError(error),
-    });
+    if (!queuedResponseSent) {
+      await publishMaintainerStatus(config, redisClient, {
+        state: "failed",
+        stage: statusStage,
+        runId: runId || undefined,
+        startedAt: runStartedAt > 0 ? new Date(runStartedAt).toISOString() : undefined,
+        updatedAt: finishedAt,
+        finishedAt,
+        durationMs: runStartedAt > 0 ? Date.now() - runStartedAt : undefined,
+        error: toMaintainerStatusError(error),
+      });
+    }
     return NextResponse.json(
       {
         success: false,

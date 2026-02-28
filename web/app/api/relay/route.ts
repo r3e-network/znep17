@@ -449,6 +449,9 @@ function getMaintainerHint(status: MaintainerStatusSnapshot | null): string | nu
   const state = status.state.toLowerCase();
   const stage = (status.stage || "").toLowerCase();
 
+  if (state === "queued" || stage === "queued") {
+    return "Maintainer update is queued for prover execution. Finalization should continue once the worker picks it up.";
+  }
   if (state === "running" && stage === "proof_generation") {
     return "Maintainer is generating the tree-update proof. This can take a few minutes on testnet.";
   }

@@ -75,6 +75,9 @@ export function getMerkleProofRetryStatus(
   if (normalizedReason.includes(FINALIZATION_DELAY_MESSAGE)) {
     const state = (maintainerStatus?.state || "").trim().toLowerCase();
     const stage = (maintainerStatus?.stage || "").trim().toLowerCase();
+    if (state === "queued" || stage === "queued") {
+      return `Deposit found. Maintainer update is queued for prover execution (${formatElapsed(elapsedMs)} elapsed). Auto-retrying in ${delaySeconds}s...`;
+    }
     if (state === "running" && stage === "proof_generation") {
       return `Deposit found. Maintainer is generating the tree-update proof (${formatElapsed(elapsedMs)} elapsed). Auto-retrying in ${delaySeconds}s...`;
     }

@@ -51,6 +51,17 @@ describe("withdraw merkle-proof retry policy", () => {
     expect(status).toContain("Auto-retrying");
   });
 
+  it("builds queued maintainer status copy for finalization waits", () => {
+    const status = getMerkleProofRetryStatus(
+      "Commitment is not yet included in a finalized Merkle root. Retry shortly.",
+      MERKLE_FINALIZATION_RETRY_DELAY_MS,
+      25_000,
+      { state: "queued", stage: "queued" },
+    );
+    expect(status).toContain("queued");
+    expect(status).toContain("0:25");
+  });
+
   it("builds user-facing status for rate limits", () => {
     const status = getMerkleProofRetryStatus(
       "Too many proof requests. Retry later.",

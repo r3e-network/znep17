@@ -13,6 +13,9 @@ const fullProveMock = vi.fn();
 const depositsUpsertMock = vi.fn();
 const merkleInsertMock = vi.fn();
 const supabaseFromMock = vi.fn();
+const redisSetMock = vi.fn();
+const redisDelMock = vi.fn();
+const redisRpushMock = vi.fn();
 
 const supabaseState: {
   deposits: DepositRow[];
@@ -90,11 +93,14 @@ vi.mock("@cityofzion/neon-js", () => {
 
 vi.mock("@upstash/redis", () => {
   class MockRedis {
-    async set() {
-      return "OK";
+    async set(...args: unknown[]) {
+      return redisSetMock(...args);
     }
-    async del() {
-      return 1;
+    async del(...args: unknown[]) {
+      return redisDelMock(...args);
+    }
+    async rpush(...args: unknown[]) {
+      return redisRpushMock(...args);
     }
   }
   return { Redis: MockRedis };
@@ -239,6 +245,12 @@ beforeEach(() => {
   rpcGetVersionMock.mockReset();
   contractInvokeMock.mockReset();
   fullProveMock.mockReset();
+  redisSetMock.mockReset();
+  redisDelMock.mockReset();
+  redisRpushMock.mockReset();
+  redisSetMock.mockResolvedValue("OK");
+  redisDelMock.mockResolvedValue(1);
+  redisRpushMock.mockResolvedValue(1);
   fullProveMock.mockImplementation(async (witness: Record<string, string>) => ({
     proof: {},
     publicSignals: [
@@ -367,6 +379,88 @@ describe("maintainer route", () => {
     expect(response.status).toBe(200);
     expect(payload.success).toBe(true);
     expect(payload.message).toBe("Tree is already up to date.");
+  });
+
+  it("queues maintainer update when async queue mode is enabled", async () => {
+    setBaseEnv();
+    const env = process.env as Record<string, string | undefined>;
+    env["MAINTAINER_ASYNC_QUEUE"] = "true";
+    env["KV_REST_API_URL"] = "https://example.upstash.io";
+    env["KV_REST_API_TOKEN"] = "token";
+    env["MAINTAINER_REQUIRE_DURABLE_LOCK"] = "true";
+
+    const { POST } = await loadRoute();
+    const response = await POST(new Request("https://app.example.com/api/maintainer", { method: "POST" }));
+    const payload = (await response.json()) as { queued?: boolean; success?: boolean; message?: string };
+
+    expect(response.status).toBe(202);
+    expect(payload.success).toBe(true);
+    expect(payload.queued).toBe(true);
+    expect(payload.message).toContain("queued");
+    expect(redisRpushMock).toHaveBeenCalledTimes(1);
+    expect(contractInvokeMock).not.toHaveBeenCalled();
+    expect(rpcInvokeFunctionMock).not.toHaveBeenCalled();
+  });
+
+  it("deduplicates already queued maintainer update requests", async () => {
+    setBaseEnv();
+    const env = process.env as Record<string, string | undefined>;
+    env["MAINTAINER_ASYNC_QUEUE"] = "true";
+    env["KV_REST_API_URL"] = "https://example.upstash.io";
+    env["KV_REST_API_TOKEN"] = "token";
+    env["MAINTAINER_REQUIRE_DURABLE_LOCK"] = "true";
+
+    redisSetMock.mockImplementation(async (key: string) => {
+      if (String(key).includes("maintainer-queue-pending")) {
+        return null;
+      }
+      return "OK";
+    });
+
+    const { POST } = await loadRoute();
+    const response = await POST(new Request("https://app.example.com/api/maintainer", { method: "POST" }));
+    const payload = (await response.json()) as { queued?: boolean; success?: boolean; message?: string };
+
+    expect(response.status).toBe(202);
+    expect(payload.success).toBe(true);
+    expect(payload.queued).toBe(false);
+    expect(payload.message).toContain("already queued");
+    expect(redisRpushMock).not.toHaveBeenCalled();
+    expect(contractInvokeMock).not.toHaveBeenCalled();
+    expect(rpcInvokeFunctionMock).not.toHaveBeenCalled();
+  });
+
+  it("executes immediately for worker-marked requests even when async queue mode is enabled", async () => {
+    setBaseEnv();
+    const env = process.env as Record<string, string | undefined>;
+    env["MAINTAINER_ASYNC_QUEUE"] = "true";
+    env["KV_REST_API_URL"] = "https://example.upstash.io";
+    env["KV_REST_API_TOKEN"] = "token";
+    env["MAINTAINER_REQUIRE_DURABLE_LOCK"] = "true";
+
+    rpcInvokeFunctionMock.mockImplementation(async (_hash: string, operation: string) => {
+      if (operation === "getLeafIndex") return intResult(0);
+      if (operation === "getLastRootLeafCount") return intResult(0);
+      if (operation === "getCurrentRoot") return emptyByteResult();
+      throw new Error(`Unexpected operation: ${operation}`);
+    });
+
+    const { POST } = await loadRoute();
+    const response = await POST(
+      new Request("https://app.example.com/api/maintainer", {
+        method: "POST",
+        headers: {
+          "x-maintainer-worker-execute": "1",
+        },
+      }),
+    );
+    const payload = (await response.json()) as { success?: boolean; message?: string; error?: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.success).toBe(true);
+    expect(payload.message).toBe("Tree is already up to date.");
+    expect(redisRpushMock).not.toHaveBeenCalled();
+    expect(rpcInvokeFunctionMock).toHaveBeenCalled();
   });
 
   it("allows authenticated vercel cron requests when origin allowlist is enabled", async () => {

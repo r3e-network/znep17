@@ -30,6 +30,8 @@ SUPABASE_SERVICE_ROLE_KEY=replace-with-supabase-service-role-key
 ENV
 
 npm run dev
+# run separately in another terminal for async prover-worker mode
+npm run maintainer:worker
 ```
 
 ## API
@@ -39,8 +41,9 @@ npm run dev
 - `POST /api/relay`
   - expects SNARK proof payload, validates proof off-chain, submits `withdraw`
 - `POST /api/maintainer`
-  - server updater endpoint: syncs missing leaves from chain/Supabase cache, builds a Groth16 tree-update proof, and submits `updateMerkleRoot(proof, publicInputs, newRoot)` for the next leaf step
-  - response includes `remainingLeaves`; invoke again until it reaches `0` to catch up fully
+  - when `MAINTAINER_ASYNC_QUEUE=true` (default outside tests): enqueues an update job and returns `202` immediately
+  - with `x-maintainer-worker-execute: 1`: runs one or more update steps (worker path), syncs missing leaves from chain/Supabase cache, builds Groth16 tree-update proofs, and submits `updateMerkleRoot(proof, publicInputs, newRoot)`
+  - worker script: `npm run maintainer:worker` polls Upstash queue and executes maintainer runs outside serverless timeout limits
 
 ## Production Requirements
 
@@ -52,9 +55,15 @@ npm run dev
 2. Configure durable Redis:
    - `KV_REST_API_URL`
    - `KV_REST_API_TOKEN`
-3. Non-secret chain/policy values are hardcoded in source for the znep17.app testnet deployment.
-4. Configure the vault contract with the relayer address via `setRelayer`.
-5. Do not expose maintainer/relayer API keys to browser clients; invoke `/api/maintainer` from cron/server jobs.
+3. Run the maintainer worker as a separate long-running process:
+   - `npm run maintainer:worker`
+   - optional tuning:
+     - `MAINTAINER_WORKER_POLL_MS`
+     - `MAINTAINER_WORKER_MAX_BATCH_STEPS`
+     - `MAINTAINER_WORKER_REQUEST_URL`
+4. Non-secret chain/policy values are hardcoded in source for the znep17.app testnet deployment.
+5. Configure the vault contract with the relayer address via `setRelayer`.
+6. Do not expose maintainer/relayer API keys to browser clients; invoke `/api/maintainer` from cron/server jobs.
 
 ## Vercel
 
@@ -68,8 +77,9 @@ The relayer and maintainer routes run in `runtime=nodejs` as dynamic API routes 
 4. Keep install/build commands aligned with `web/vercel.json`:
    - `npm ci`
    - `npm run build`
-5. Vercel Cron is configured in `web/vercel.json` to call `/api/maintainer` every minute.
-6. The relayer also auto-kicks `/api/maintainer` (throttled) when a proof is pending finalization, so users do not need manual maintainer actions.
+5. Vercel Cron can still call `/api/maintainer`, but it now enqueues jobs (fast) instead of proving inline.
+6. The relayer auto-kicks `/api/maintainer` (throttled) when a proof is pending finalization, which adds queue jobs for the worker.
+7. Heavy tree-update proving must run in the separate worker process (not in Vercel request execution).
 
 ### Production Env Checklist (Vercel)
 
