@@ -1,4 +1,4 @@
-export const DEFAULT_RPC_URL = "https://testnet1.neo.coz.io:443";
+export const DEFAULT_RPC_URL = "http://seed2t5.neo.org:20332";
 export const DEFAULT_VAULT_HASH = "0xa33b0788ad0324c5eb40ea803be8ed96f24d7fa6";
 export const DEFAULT_ALLOWED_TOKEN_HASHES =
   "0x2a0010799d828155cf522f47c38e4e9d797a9697,0xd2a4cff31913016155e38e474a2c06d08be276cf";

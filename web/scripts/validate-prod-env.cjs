@@ -5,7 +5,7 @@ const path = require("node:path");
 const dotenv = require("dotenv");
 
 const HASH160_HEX_RE = /^(?:0x)?[0-9a-fA-F]{40}$/;
-const DEFAULT_RPC_URL = "https://testnet1.neo.coz.io:443";
+const DEFAULT_RPC_URL = "http://seed2t5.neo.org:20332";
 const DEFAULT_VAULT_HASH = "0xa33b0788ad0324c5eb40ea803be8ed96f24d7fa6";
 const DEFAULT_ALLOWED_TOKEN_HASHES =
   "0x2a0010799d828155cf522f47c38e4e9d797a9697,0xd2a4cff31913016155e38e474a2c06d08be276cf";
@@ -146,7 +146,7 @@ function run() {
   const relayerRequireOriginAllowlist = parseBoolean(read(env, "RELAYER_REQUIRE_ORIGIN_ALLOWLIST"), true);
   const relayerRequireDurableGuards = parseBoolean(read(env, "RELAYER_REQUIRE_DURABLE_GUARDS"), true);
   const relayerRequireStrongVerifier = parseBoolean(read(env, "RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER"), true);
-  const relayerAllowInsecureRpc = parseBoolean(read(env, "RELAYER_ALLOW_INSECURE_RPC"), false);
+  const relayerAllowInsecureRpc = parseBoolean(read(env, "RELAYER_ALLOW_INSECURE_RPC"), !isSecureRpc(rpcUrl));
   const relayerExpectedVerifierHash = read(env, "RELAYER_EXPECTED_VERIFIER_HASH") || DEFAULT_VERIFIER_HASH;
   const relayerApiKey = read(env, "RELAYER_API_KEY");
   const relayerOrigins = csv(env, "RELAYER_ALLOWED_ORIGINS");
@@ -165,7 +165,10 @@ function run() {
   const maintainerApiKey = read(env, "MAINTAINER_API_KEY") || relayerApiKey;
   const cronSecret = read(env, "CRON_SECRET");
   const maintainerRequireDurableLock = parseBoolean(read(env, "MAINTAINER_REQUIRE_DURABLE_LOCK"), true);
-  const maintainerAllowInsecureRpc = parseBoolean(read(env, "MAINTAINER_ALLOW_INSECURE_RPC"), relayerAllowInsecureRpc);
+  const maintainerAllowInsecureRpc = parseBoolean(
+    read(env, "MAINTAINER_ALLOW_INSECURE_RPC"),
+    relayerAllowInsecureRpc || !isSecureRpc(rpcUrl),
+  );
   const maintainerRequireOriginAllowlist = parseBoolean(read(env, "MAINTAINER_REQUIRE_ORIGIN_ALLOWLIST"), true);
   const maintainerOrigins = csv(env, "MAINTAINER_ALLOWED_ORIGINS");
   const mergedMaintainerOrigins = maintainerOrigins.length > 0 ? maintainerOrigins : mergedRelayerOrigins;

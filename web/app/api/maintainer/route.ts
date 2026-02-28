@@ -653,10 +653,11 @@ function parseConfig(): MaintainerConfig {
   const nodeEnv = (process.env.NODE_ENV || "").trim().toLowerCase();
   const vercelEnv = (process.env.VERCEL_ENV || "").trim().toLowerCase();
   const isProduction = vercelEnv === "production" || (nodeEnv === "production" && vercelEnv.length === 0);
+  const testRpcUrlFallback = "https://testnet1.neo.coz.io:443";
 
   const rpcUrl =
     (ALLOW_TEST_OVERRIDES
-      ? process.env.MAINTAINER_RPC_URL || process.env.RPC_URL || process.env.NEXT_PUBLIC_RPC_URL
+      ? process.env.MAINTAINER_RPC_URL || process.env.RPC_URL || process.env.NEXT_PUBLIC_RPC_URL || testRpcUrlFallback
       : undefined) || DEFAULT_RPC_URL;
   const rawVaultHash =
     (ALLOW_TEST_OVERRIDES
@@ -681,7 +682,10 @@ function parseConfig(): MaintainerConfig {
   );
   const allowInsecureRpc = parseBooleanEnv(
     ALLOW_TEST_OVERRIDES ? process.env.MAINTAINER_ALLOW_INSECURE_RPC : undefined,
-    parseBooleanEnv(ALLOW_TEST_OVERRIDES ? process.env.RELAYER_ALLOW_INSECURE_RPC : undefined, false),
+    parseBooleanEnv(
+      ALLOW_TEST_OVERRIDES ? process.env.RELAYER_ALLOW_INSECURE_RPC : undefined,
+      !ALLOW_TEST_OVERRIDES && !hasSecureRpcTransport(rpcUrl),
+    ),
   );
   const allowedOriginsRaw =
     (ALLOW_TEST_OVERRIDES ? process.env.MAINTAINER_ALLOWED_ORIGINS || process.env.RELAYER_ALLOWED_ORIGINS : undefined) ||

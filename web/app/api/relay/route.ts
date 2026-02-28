@@ -20,7 +20,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const ALLOW_TEST_OVERRIDES = process.env.VITEST === "true";
-const RPC_URL = (ALLOW_TEST_OVERRIDES ? process.env.RPC_URL : "") || DEFAULT_RPC_URL;
+const TEST_RPC_URL_FALLBACK = "https://testnet1.neo.coz.io:443";
+const RPC_URL = (ALLOW_TEST_OVERRIDES ? process.env.RPC_URL || TEST_RPC_URL_FALLBACK : "") || DEFAULT_RPC_URL;
 const RELAYER_WIF = process.env.RELAYER_WIF || "";
 const VAULT_HASH = (ALLOW_TEST_OVERRIDES ? process.env.VAULT_HASH : "") || DEFAULT_VAULT_HASH;
 const ALLOWED_TOKEN_HASHES =
@@ -99,7 +100,7 @@ const RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER = parseBooleanEnv(
 );
 const RELAYER_ALLOW_INSECURE_RPC = parseBooleanEnv(
   ALLOW_TEST_OVERRIDES ? process.env.RELAYER_ALLOW_INSECURE_RPC : undefined,
-  false,
+  !ALLOW_TEST_OVERRIDES && !hasSecureRpcTransport(RPC_URL),
 );
 const RELAYER_TRUST_PROXY_HEADERS = parseBooleanEnv(
   ALLOW_TEST_OVERRIDES ? process.env.RELAYER_TRUST_PROXY_HEADERS : undefined,
