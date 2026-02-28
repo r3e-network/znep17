@@ -259,6 +259,7 @@ describe("relay GET proof policy", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        origin: "https://relay.example.com",
       },
       body: JSON.stringify(
         buildValidPostBody({
@@ -276,11 +277,14 @@ describe("relay GET proof policy", () => {
 
   it("returns 400 for amount overflow on POST", async () => {
     setBaseEnv();
+    const env = process.env as Record<string, string | undefined>;
+    env["ALLOWED_TOKEN_HASHES"] = `0x${"33".repeat(20)}`;
     const { POST } = await loadRouteModule();
     const req = new Request("https://relay.example.com/api/relay", {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        origin: "https://relay.example.com",
       },
       body: JSON.stringify(
         buildValidPostBody({
@@ -304,6 +308,7 @@ describe("relay GET proof policy", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        origin: "https://relay.example.com",
       },
       body: JSON.stringify(
         buildValidPostBody({
@@ -330,6 +335,7 @@ describe("relay GET proof policy", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
+        origin: "https://relay.example.com",
       },
       body: JSON.stringify(body),
     });

@@ -7,16 +7,23 @@ import vKey from "../../../public/zk/verification_key.json";
 import { getClientIpFromHeaders, isOriginAllowed, parseOriginAllowlist, readApiCredential } from "./policy";
 import { encodeGroth16ProofPayload, encodePublicInputsPayload, hash160ToFieldDecimal } from "./zk-encoding";
 import { poseidon2Bls } from "../../lib/blsPoseidon";
+import {
+  DEFAULT_ALLOWED_TOKEN_HASHES,
+  DEFAULT_RELAYER_ALLOWED_ORIGINS,
+  DEFAULT_RPC_URL,
+  DEFAULT_VAULT_HASH,
+  DEFAULT_VERIFIER_HASH,
+} from "../../lib/deployment-defaults";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const RPC_URL = process.env.RPC_URL || "https://n3seed1.ngd.network:20332";
+const RPC_URL = process.env.RPC_URL || DEFAULT_RPC_URL;
 const RELAYER_WIF = process.env.RELAYER_WIF || "";
-const VAULT_HASH = process.env.VAULT_HASH || "";
-const ALLOWED_TOKEN_HASHES = process.env.ALLOWED_TOKEN_HASHES || "";
-const RELAYER_ALLOWED_ORIGINS = process.env.RELAYER_ALLOWED_ORIGINS || "";
+const VAULT_HASH = process.env.VAULT_HASH || DEFAULT_VAULT_HASH;
+const ALLOWED_TOKEN_HASHES = process.env.ALLOWED_TOKEN_HASHES || DEFAULT_ALLOWED_TOKEN_HASHES;
+const RELAYER_ALLOWED_ORIGINS = process.env.RELAYER_ALLOWED_ORIGINS || DEFAULT_RELAYER_ALLOWED_ORIGINS;
 const RELAYER_API_KEY = process.env.RELAYER_API_KEY || "";
 const NODE_ENV = (process.env.NODE_ENV || "development").trim().toLowerCase();
 const VERCEL_ENV = (process.env.VERCEL_ENV || "").trim().toLowerCase();
@@ -74,17 +81,17 @@ type RpcStackItem = {
 };
 
 const RELAYER_PROOF_MODE: ProofMode = "snark";
-const RELAYER_REQUIRE_AUTH = parseBooleanEnv(process.env.RELAYER_REQUIRE_AUTH, IS_PRODUCTION);
-const RELAYER_REQUIRE_ORIGIN_ALLOWLIST = parseBooleanEnv(process.env.RELAYER_REQUIRE_ORIGIN_ALLOWLIST, IS_PRODUCTION);
-const RELAYER_REQUIRE_DURABLE_GUARDS = parseBooleanEnv(process.env.RELAYER_REQUIRE_DURABLE_GUARDS, false);
+const RELAYER_REQUIRE_AUTH = parseBooleanEnv(process.env.RELAYER_REQUIRE_AUTH, false);
+const RELAYER_REQUIRE_ORIGIN_ALLOWLIST = parseBooleanEnv(process.env.RELAYER_REQUIRE_ORIGIN_ALLOWLIST, true);
+const RELAYER_REQUIRE_DURABLE_GUARDS = parseBooleanEnv(process.env.RELAYER_REQUIRE_DURABLE_GUARDS, true);
 const RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER = parseBooleanEnv(
   process.env.RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER,
-  IS_PRODUCTION,
+  true,
 );
 const RELAYER_ALLOW_INSECURE_RPC = parseBooleanEnv(process.env.RELAYER_ALLOW_INSECURE_RPC, false);
 const RELAYER_TRUST_PROXY_HEADERS = parseBooleanEnv(
   process.env.RELAYER_TRUST_PROXY_HEADERS,
-  process.env.VERCEL === "1",
+  true,
 );
 const RELAYER_ENABLE_MAINTAINER_AUTOKICK = parseBooleanEnv(process.env.RELAYER_ENABLE_MAINTAINER_AUTOKICK, true);
 const RELAYER_MAINTAINER_AUTOKICK_INTERVAL_MS = parsePositiveIntEnv(
@@ -95,7 +102,7 @@ const RELAYER_MAINTAINER_AUTOKICK_TIMEOUT_MS = parsePositiveIntEnv(
   process.env.RELAYER_MAINTAINER_AUTOKICK_TIMEOUT_MS,
   DEFAULT_MAINTAINER_AUTOKICK_TIMEOUT_MS,
 );
-const RELAYER_EXPECTED_VERIFIER_HASH_RAW = process.env.RELAYER_EXPECTED_VERIFIER_HASH || "";
+const RELAYER_EXPECTED_VERIFIER_HASH_RAW = process.env.RELAYER_EXPECTED_VERIFIER_HASH || DEFAULT_VERIFIER_HASH;
 const RELAYER_EXPECTED_VERIFIER_HASH = normalizeOptionalHash160Env(RELAYER_EXPECTED_VERIFIER_HASH_RAW);
 const RELAYER_MERKLE_MAX_BOOTSTRAP_LEAVES = parsePositiveIntEnv(
   process.env.RELAYER_MERKLE_MAX_BOOTSTRAP_LEAVES,

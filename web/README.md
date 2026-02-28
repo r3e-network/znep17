@@ -18,18 +18,14 @@ This Next.js application provides the zNEP-17 user interface and a SNARK-verifyi
 npm install
 
 cat > .env.local <<'ENV'
-RPC_URL=https://n3seed1.ngd.network:20332
-# Recommended testnet RPC for current contract build.
-# Some alternative endpoints may reject deploy/invoke simulation for System.Storage.Local syscalls.
-VAULT_HASH=0xYourVaultContractHash
 RELAYER_WIF=YourFundedRelayerWIF
-ALLOWED_TOKEN_HASHES=0xd2a4cff31913016155e38e474a2c06d08be276cf,0xef4073a0f2b305a38ec4050e4d3d28bc40ea63f5
-RELAYER_ALLOWED_ORIGINS=http://localhost:3000
 RELAYER_API_KEY=strong-random-secret
-RELAYER_REQUIRE_AUTH=false
-RELAYER_REQUIRE_ORIGIN_ALLOWLIST=true
-RELAYER_REQUIRE_DURABLE_GUARDS=false
-RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER=true
+# Non-secret defaults (RPC, vault hash, token allowlist, origin allowlist, verifier hash)
+# are hardcoded for znep17.app testnet and can be overridden only if needed:
+# RPC_URL=https://testnet1.neo.coz.io:443
+# VAULT_HASH=0xa33b0788ad0324c5eb40ea803be8ed96f24d7fa6
+# ALLOWED_TOKEN_HASHES=0x2a0010799d828155cf522f47c38e4e9d797a9697,0xd2a4cff31913016155e38e474a2c06d08be276cf
+# RELAYER_ALLOWED_ORIGINS=http://localhost:3000
 # Optional legacy HTTP testnet seeds (not recommended):
 # RPC_URL=http://seed2t5.neo.org:20332
 # RELAYER_ALLOW_INSECURE_RPC=true
@@ -62,6 +58,7 @@ MAINTAINER_REQUIRE_DURABLE_LOCK=false
 # NEXT_PUBLIC_ENABLE_MAINTAINER_TOOLS=false
 # Optional: bound per-run cache catch-up for maintainer endpoint:
 # MAINTAINER_MAX_SYNC_LEAVES=20000
+# MAINTAINER_RPC_TIMEOUT_MS=240000
 ENV
 
 npm run dev
@@ -79,31 +76,24 @@ npm run dev
 
 ## Production Requirements
 
-1. Always configure:
-   - `ALLOWED_TOKEN_HASHES=<one or more trusted token hashes>`
-   - `RELAYER_REQUIRE_ORIGIN_ALLOWLIST=true`
-   - `RELAYER_REQUIRE_DURABLE_GUARDS=true`
+1. Configure secrets:
+   - `RELAYER_WIF`
+   - `RELAYER_API_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
 2. Configure durable Redis:
    - `KV_REST_API_URL`
    - `KV_REST_API_TOKEN`
-3. Restrict origin/API access:
-   - `RELAYER_ALLOWED_ORIGINS=<trusted origins>`
-4. Choose auth mode:
-   - Public browser relayer: `RELAYER_REQUIRE_AUTH=false` (recommended for public web UIs)
-   - Private/internal clients: `RELAYER_REQUIRE_AUTH=true` and `RELAYER_API_KEY=<strong secret>`
-5. Browser UI does not embed relayer API keys; when auth is enabled, use server-to-server or trusted client integrations.
-6. Configure the vault contract with the relayer address via `setRelayer`.
-7. Keep `RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER=true` in production (default); the relayer rejects weak/sentinel-style on-chain verifiers.
-8. Set `RELAYER_EXPECTED_VERIFIER_HASH=<trusted verifier hash>` in production to pin the verifier contract identity.
-9. Keep `NEXT_PUBLIC_ALLOW_CUSTOM_VAULT_HASH=false` (default) so the UI cannot send deposits to arbitrary vault hashes.
-10. Keep `NEXT_PUBLIC_ENABLE_MAINTAINER_TOOLS=false` in public deployments.
-11. Configure maintainer endpoint hardening:
+3. Browser UI does not embed relayer API keys; keep `RELAYER_REQUIRE_AUTH=false` for public web usage unless you add a trusted backend.
+4. Configure the vault contract with the relayer address via `setRelayer`.
+5. Keep `NEXT_PUBLIC_ALLOW_CUSTOM_VAULT_HASH=false` (default) so the UI cannot send deposits to arbitrary vault hashes.
+6. Keep `NEXT_PUBLIC_ENABLE_MAINTAINER_TOOLS=false` in public deployments.
+7. Configure maintainer endpoint hardening:
    - `MAINTAINER_REQUIRE_AUTH=true`
    - `RELAYER_API_KEY=<strong secret>` (or optional `MAINTAINER_API_KEY` override)
    - `MAINTAINER_REQUIRE_DURABLE_LOCK=true` with `KV_REST_API_URL` + `KV_REST_API_TOKEN`
-12. Do not expose maintainer/relayer API keys to browser clients; invoke `/api/maintainer` from cron/server jobs.
-13. For Vercel Cron, set `CRON_SECRET` to the same value as the maintainer auth secret (`MAINTAINER_API_KEY` or `RELAYER_API_KEY`).
-13. Configure maintainer state backend:
+8. Do not expose maintainer/relayer API keys to browser clients; invoke `/api/maintainer` from cron/server jobs.
+9. For Vercel Cron, set `CRON_SECRET` to the same value as the maintainer auth secret (`MAINTAINER_API_KEY` or `RELAYER_API_KEY`).
+10. Configure maintainer state backend:
    - `SUPABASE_URL` (or `NEXT_PUBLIC_SUPABASE_URL`)
    - `SUPABASE_SERVICE_ROLE_KEY`
 

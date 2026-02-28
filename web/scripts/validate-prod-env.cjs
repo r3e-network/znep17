@@ -5,6 +5,13 @@ const path = require("node:path");
 const dotenv = require("dotenv");
 
 const HASH160_HEX_RE = /^(?:0x)?[0-9a-fA-F]{40}$/;
+const DEFAULT_RPC_URL = "https://testnet1.neo.coz.io:443";
+const DEFAULT_VAULT_HASH = "0xa33b0788ad0324c5eb40ea803be8ed96f24d7fa6";
+const DEFAULT_ALLOWED_TOKEN_HASHES =
+  "0x2a0010799d828155cf522f47c38e4e9d797a9697,0xd2a4cff31913016155e38e474a2c06d08be276cf";
+const DEFAULT_RELAYER_ALLOWED_ORIGINS = "https://znep17.app,https://www.znep17.app";
+const DEFAULT_VERIFIER_HASH = "0xd3b432b5e3adae1f6e30249ee8c701eccbd1d4ab";
+const DEFAULT_SUPABASE_URL = "https://dmonstzalbldzzdbbcdj.supabase.co";
 
 function parseArgs(argv) {
   const args = { envFile: null };
@@ -75,6 +82,15 @@ function parseBoolean(raw, defaultValue) {
   return defaultValue;
 }
 
+function parsePositiveInt(raw, defaultValue) {
+  if (!raw) return defaultValue;
+  const normalized = raw.trim();
+  if (!/^\d+$/.test(normalized)) return defaultValue;
+  const value = Number(normalized);
+  if (!Number.isSafeInteger(value) || value <= 0) return defaultValue;
+  return value;
+}
+
 function csv(env, key) {
   return read(env, key)
     .split(",")
@@ -124,17 +140,18 @@ function run() {
   const addCheck = (name, pass, detail = "") => checks.push({ name, pass, detail });
   const addAdvisory = (name, pass, detail = "") => advisories.push({ name, pass, detail });
 
-  const rpcUrl = read(env, "RPC_URL");
-  const vaultHash = read(env, "VAULT_HASH");
+  const rpcUrl = read(env, "RPC_URL") || DEFAULT_RPC_URL;
+  const vaultHash = read(env, "VAULT_HASH") || DEFAULT_VAULT_HASH;
   const relayerWif = read(env, "RELAYER_WIF");
   const relayerRequireOriginAllowlist = parseBoolean(read(env, "RELAYER_REQUIRE_ORIGIN_ALLOWLIST"), true);
-  const relayerRequireDurableGuards = parseBoolean(read(env, "RELAYER_REQUIRE_DURABLE_GUARDS"), false);
+  const relayerRequireDurableGuards = parseBoolean(read(env, "RELAYER_REQUIRE_DURABLE_GUARDS"), true);
   const relayerRequireStrongVerifier = parseBoolean(read(env, "RELAYER_REQUIRE_STRONG_ONCHAIN_VERIFIER"), true);
   const relayerAllowInsecureRpc = parseBoolean(read(env, "RELAYER_ALLOW_INSECURE_RPC"), false);
-  const relayerExpectedVerifierHash = read(env, "RELAYER_EXPECTED_VERIFIER_HASH");
+  const relayerExpectedVerifierHash = read(env, "RELAYER_EXPECTED_VERIFIER_HASH") || DEFAULT_VERIFIER_HASH;
   const relayerApiKey = read(env, "RELAYER_API_KEY");
   const relayerOrigins = csv(env, "RELAYER_ALLOWED_ORIGINS");
-  const tokenAllowlist = parseTokenAllowlist(csv(env, "ALLOWED_TOKEN_HASHES"));
+  const mergedRelayerOrigins = relayerOrigins.length > 0 ? relayerOrigins : DEFAULT_RELAYER_ALLOWED_ORIGINS.split(",");
+  const tokenAllowlist = parseTokenAllowlist(csv(env, "ALLOWED_TOKEN_HASHES").length > 0 ? csv(env, "ALLOWED_TOKEN_HASHES") : DEFAULT_ALLOWED_TOKEN_HASHES.split(","));
 
   const kvRestApiUrl = read(env, "KV_REST_API_URL");
   const kvRestApiToken = read(env, "KV_REST_API_TOKEN");
@@ -149,11 +166,12 @@ function run() {
   const cronSecret = read(env, "CRON_SECRET");
   const maintainerRequireDurableLock = parseBoolean(read(env, "MAINTAINER_REQUIRE_DURABLE_LOCK"), true);
   const maintainerAllowInsecureRpc = parseBoolean(read(env, "MAINTAINER_ALLOW_INSECURE_RPC"), relayerAllowInsecureRpc);
-  const maintainerRequireOriginAllowlist = parseBoolean(read(env, "MAINTAINER_REQUIRE_ORIGIN_ALLOWLIST"), false);
+  const maintainerRequireOriginAllowlist = parseBoolean(read(env, "MAINTAINER_REQUIRE_ORIGIN_ALLOWLIST"), true);
   const maintainerOrigins = csv(env, "MAINTAINER_ALLOWED_ORIGINS");
-  const mergedMaintainerOrigins = maintainerOrigins.length > 0 ? maintainerOrigins : relayerOrigins;
+  const mergedMaintainerOrigins = maintainerOrigins.length > 0 ? maintainerOrigins : mergedRelayerOrigins;
+  const maintainerRpcTimeoutMs = parsePositiveInt(read(env, "MAINTAINER_RPC_TIMEOUT_MS"), 240000);
 
-  const supabaseUrl = read(env, "SUPABASE_URL") || read(env, "NEXT_PUBLIC_SUPABASE_URL");
+  const supabaseUrl = read(env, "SUPABASE_URL") || read(env, "NEXT_PUBLIC_SUPABASE_URL") || DEFAULT_SUPABASE_URL;
   const supabaseServiceRoleKey = read(env, "SUPABASE_SERVICE_ROLE_KEY");
 
   addCheck(
@@ -186,8 +204,8 @@ function run() {
 
   addCheck(
     "RELAYER_ALLOWED_ORIGINS configured with https origins",
-    relayerOrigins.length > 0 && relayerOrigins.every(isHttpsOriginRule),
-    relayerOrigins.length === 0 ? "missing" : "contains non-https origin",
+    mergedRelayerOrigins.length > 0 && mergedRelayerOrigins.every(isHttpsOriginRule),
+    mergedRelayerOrigins.length === 0 ? "missing" : "contains non-https origin",
   );
 
   addCheck(
@@ -283,6 +301,12 @@ function run() {
       : maintainerApiKey.length === 0
         ? "maintainer auth secret missing"
         : "CRON_SECRET should equal maintainer auth secret",
+  );
+
+  addAdvisory(
+    "MAINTAINER_RPC_TIMEOUT_MS is high enough for proving load (recommended >= 120000)",
+    maintainerRpcTimeoutMs >= 120000,
+    `current=${maintainerRpcTimeoutMs}`,
   );
 
   const passed = checks.filter((check) => check.pass).length;

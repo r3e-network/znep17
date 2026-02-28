@@ -8,6 +8,11 @@ import { poseidon2Bls } from "../../lib/blsPoseidon";
 import { getSupabaseAdminClient } from "../../lib/supabase";
 import { isOriginAllowed, parseBearerToken, parseOriginAllowlist } from "../relay/policy";
 import { encodeBigIntToLeScalar, encodeGroth16ProofPayload } from "../relay/zk-encoding";
+import {
+  DEFAULT_RELAYER_ALLOWED_ORIGINS,
+  DEFAULT_RPC_URL,
+  DEFAULT_VAULT_HASH,
+} from "../../lib/deployment-defaults";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +22,7 @@ const HASH160_HEX_RE = /^(?:0x)?[0-9a-fA-F]{40}$/;
 const HEX32_RE = /^[0-9a-fA-F]{64}$/;
 const TREE_DEPTH = 20;
 const DEFAULT_LOCK_TTL_MS = 360_000;
-const DEFAULT_RPC_TIMEOUT_MS = 45_000;
+const DEFAULT_RPC_TIMEOUT_MS = 240_000;
 const DEFAULT_MAX_SYNC_LEAVES = 20_000;
 const DEFAULT_CHAIN_FETCH_CONCURRENCY = 6;
 const TREE_UPDATE_PUBLIC_INPUT_COUNT = 5;
@@ -652,34 +657,35 @@ function parseConfig(): MaintainerConfig {
     process.env.MAINTAINER_RPC_URL ||
     process.env.RPC_URL ||
     process.env.NEXT_PUBLIC_RPC_URL ||
-    "https://testnet1.neo.coz.io:443";
+    DEFAULT_RPC_URL;
   const rawVaultHash =
     process.env.MAINTAINER_VAULT_HASH ||
     process.env.VAULT_HASH ||
     process.env.NEXT_PUBLIC_VAULT_HASH ||
-    "";
+    DEFAULT_VAULT_HASH;
   const maintainerWif = process.env.MAINTAINER_WIF || process.env.RELAYER_WIF || "";
   const maintainerApiKey = process.env.MAINTAINER_API_KEY || process.env.RELAYER_API_KEY || "";
   const treeUpdateWasmPath =
     process.env.MAINTAINER_TREE_UPDATE_WASM_PATH || path.join(process.cwd(), "public", "zk", "tree_update.wasm");
   const treeUpdateZkeyPath =
     process.env.MAINTAINER_TREE_UPDATE_ZKEY_PATH || path.join(process.cwd(), "public", "zk", "tree_update_final.zkey");
-  const requireAuth = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_AUTH, isProduction);
-  const requireOriginAllowlist = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_ORIGIN_ALLOWLIST, false);
-  const requireDurableLock = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_DURABLE_LOCK, isProduction);
+  const requireAuth = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_AUTH, true);
+  const requireOriginAllowlist = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_ORIGIN_ALLOWLIST, true);
+  const requireDurableLock = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_DURABLE_LOCK, true);
   const allowInsecureRpc = parseBooleanEnv(
     process.env.MAINTAINER_ALLOW_INSECURE_RPC,
     parseBooleanEnv(process.env.RELAYER_ALLOW_INSECURE_RPC, false),
   );
-  const allowedOriginsRaw = process.env.MAINTAINER_ALLOWED_ORIGINS || process.env.RELAYER_ALLOWED_ORIGINS || "";
+  const allowedOriginsRaw =
+    process.env.MAINTAINER_ALLOWED_ORIGINS || process.env.RELAYER_ALLOWED_ORIGINS || DEFAULT_RELAYER_ALLOWED_ORIGINS;
   const originAllowlist = parseOriginAllowlist(allowedOriginsRaw);
   const maxSyncLeaves = parsePositiveIntEnv(process.env.MAINTAINER_MAX_SYNC_LEAVES, DEFAULT_MAX_SYNC_LEAVES);
   const chainFetchConcurrency = parsePositiveIntEnv(
     process.env.MAINTAINER_CHAIN_FETCH_CONCURRENCY,
     DEFAULT_CHAIN_FETCH_CONCURRENCY,
   );
-  const lockTtlMs = parsePositiveIntEnv(process.env.MAINTAINER_LOCK_TTL_MS, DEFAULT_LOCK_TTL_MS);
-  const rpcTimeoutMs = parsePositiveIntEnv(process.env.MAINTAINER_RPC_TIMEOUT_MS, DEFAULT_RPC_TIMEOUT_MS);
+  const lockTtlMs = DEFAULT_LOCK_TTL_MS;
+  const rpcTimeoutMs = DEFAULT_RPC_TIMEOUT_MS;
   const kvRestApiUrl = process.env.KV_REST_API_URL || "";
   const kvRestApiToken = process.env.KV_REST_API_TOKEN || "";
   const guardStoreMode: GuardStoreMode =
