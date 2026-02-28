@@ -42,6 +42,8 @@ const TREE_DEPTH = 20;
 const MERKLE_MAX_BOOTSTRAP_LEAVES = 50_000;
 const MERKLE_MAX_LEAVES_HARD_LIMIT = 200_000;
 const VERIFIER_PROBE_CACHE_MS = 300_000;
+const DEFAULT_MAINTAINER_AUTOKICK_INTERVAL_MS = 20_000;
+const DEFAULT_MAINTAINER_AUTOKICK_TIMEOUT_MS = 3_000;
 
 type ProofMode = "snark";
 type GuardStoreMode = "memory" | "durable";
@@ -84,6 +86,15 @@ const RELAYER_TRUST_PROXY_HEADERS = parseBooleanEnv(
   process.env.RELAYER_TRUST_PROXY_HEADERS,
   process.env.VERCEL === "1",
 );
+const RELAYER_ENABLE_MAINTAINER_AUTOKICK = parseBooleanEnv(process.env.RELAYER_ENABLE_MAINTAINER_AUTOKICK, true);
+const RELAYER_MAINTAINER_AUTOKICK_INTERVAL_MS = parsePositiveIntEnv(
+  process.env.RELAYER_MAINTAINER_AUTOKICK_INTERVAL_MS,
+  DEFAULT_MAINTAINER_AUTOKICK_INTERVAL_MS,
+);
+const RELAYER_MAINTAINER_AUTOKICK_TIMEOUT_MS = parsePositiveIntEnv(
+  process.env.RELAYER_MAINTAINER_AUTOKICK_TIMEOUT_MS,
+  DEFAULT_MAINTAINER_AUTOKICK_TIMEOUT_MS,
+);
 const RELAYER_EXPECTED_VERIFIER_HASH_RAW = process.env.RELAYER_EXPECTED_VERIFIER_HASH || "";
 const RELAYER_EXPECTED_VERIFIER_HASH = normalizeOptionalHash160Env(RELAYER_EXPECTED_VERIFIER_HASH_RAW);
 const RELAYER_MERKLE_MAX_BOOTSTRAP_LEAVES = parsePositiveIntEnv(
@@ -98,6 +109,7 @@ const redisClient = HAS_DURABLE_GUARD_CONFIG ? new Redis({ url: KV_REST_API_URL,
 
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
 const nullifierLocks = new Map<string, number>();
+const maintainerKickStore = new Map<string, number>();
 const tokenAllowlist = parseTokenAllowlist(ALLOWED_TOKEN_HASHES);
 const originAllowlist = parseOriginAllowlist(RELAYER_ALLOWED_ORIGINS);
 
@@ -466,6 +478,86 @@ async function isRateLimited(key: string, maxRequests = RATE_MAX_REQUESTS, windo
     return isRateLimitedDurable(key, maxRequests, windowMs);
   }
   return isRateLimitedInMemory(key, maxRequests, windowMs);
+}
+
+function cleanMaintainerKickStore(now: number): void {
+  for (const [key, expiresAt] of maintainerKickStore.entries()) {
+    if (expiresAt <= now) {
+      maintainerKickStore.delete(key);
+    }
+  }
+}
+
+function shouldKickMaintainerInMemory(vaultScriptHash: string, intervalMs: number): boolean {
+  const now = Date.now();
+  cleanMaintainerKickStore(now);
+  const key = `vault:${vaultScriptHash}`;
+  const existing = maintainerKickStore.get(key);
+  if (typeof existing === "number" && existing > now) {
+    return false;
+  }
+  maintainerKickStore.set(key, now + intervalMs);
+  return true;
+}
+
+async function shouldKickMaintainer(vaultScriptHash: string): Promise<boolean> {
+  if (RELAYER_MAINTAINER_AUTOKICK_INTERVAL_MS <= 0) {
+    return false;
+  }
+
+  if (GUARD_STORE_MODE === "durable" && redisClient) {
+    const key = `znep17:maintainer-kick:${vaultScriptHash}`;
+    try {
+      const result = await redisClient.set(key, "1", {
+        nx: true,
+        px: RELAYER_MAINTAINER_AUTOKICK_INTERVAL_MS,
+      });
+      return result === "OK";
+    } catch {
+      return shouldKickMaintainerInMemory(vaultScriptHash, RELAYER_MAINTAINER_AUTOKICK_INTERVAL_MS);
+    }
+  }
+
+  return shouldKickMaintainerInMemory(vaultScriptHash, RELAYER_MAINTAINER_AUTOKICK_INTERVAL_MS);
+}
+
+async function kickMaintainerAsync(req: Request, vaultScriptHash: string): Promise<void> {
+  if (!RELAYER_ENABLE_MAINTAINER_AUTOKICK) {
+    return;
+  }
+  const shouldKick = await shouldKickMaintainer(vaultScriptHash);
+  if (!shouldKick) {
+    return;
+  }
+
+  const maintainerUrl = new URL("/api/maintainer", req.url);
+  const headers = new Headers({
+    origin: maintainerUrl.origin,
+    referer: `${maintainerUrl.origin}/api/relay`,
+  });
+  if (RELAYER_API_KEY.trim().length > 0) {
+    headers.set("x-relayer-api-key", RELAYER_API_KEY.trim());
+  }
+
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => {
+    controller.abort();
+  }, RELAYER_MAINTAINER_AUTOKICK_TIMEOUT_MS);
+  try {
+    await fetch(maintainerUrl.toString(), {
+      method: "POST",
+      headers,
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch (error: unknown) {
+    const errorName = error instanceof Error ? error.name : "";
+    if (errorName !== "AbortError") {
+      console.error("Maintainer auto-kick failed:", error instanceof Error ? error.message : String(error));
+    }
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
 }
 
 function cleanNullifierLocks(now: number): void {
@@ -985,6 +1077,7 @@ export async function GET(req: Request) {
         );
       }
       if (commitmentIndex >= lastRootLeafCount) {
+        void kickMaintainerAsync(req, vaultScriptHash);
         const message = "Commitment is not yet included in a finalized Merkle root. Retry shortly.";
         if (softProofMode) {
           return NextResponse.json(

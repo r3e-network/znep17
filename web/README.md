@@ -120,13 +120,14 @@ The relayer and maintainer routes run in `runtime=nodejs` as dynamic API routes 
    - `npm ci`
    - `npm run build`
 5. Vercel Cron is configured in `web/vercel.json` to call `/api/maintainer` every minute.
+6. The relayer also auto-kicks `/api/maintainer` (throttled) when a proof is pending finalization, so users do not need manual maintainer actions.
 
 ### Production Env Checklist (Vercel)
 
 1. Use [`web/env.vercel.production.example`](./env.vercel.production.example) as the source template for all Production env vars in Vercel.
 2. Populate secrets and addresses in Vercel Project Settings -> Environment Variables (Production).
    - For this deployment, keep `RELAYER_ALLOWED_ORIGINS=https://znep17.app,https://www.znep17.app`.
-   - Keep `MAINTAINER_ALLOWED_ORIGINS=https://znep17.app` unless maintainer is called only from a separate backend/cron origin.
+   - Keep `MAINTAINER_ALLOWED_ORIGINS=https://znep17.app,https://www.znep17.app` unless maintainer is called only from a separate backend/cron origin.
 3. Pull the configured Production env set locally:
    - `vercel env pull .env.vercel.production`
 4. Run the production validator:

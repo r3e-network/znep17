@@ -16,7 +16,8 @@ export const maxDuration = 300;
 const HASH160_HEX_RE = /^(?:0x)?[0-9a-fA-F]{40}$/;
 const HEX32_RE = /^[0-9a-fA-F]{64}$/;
 const TREE_DEPTH = 20;
-const DEFAULT_LOCK_TTL_MS = 120_000;
+const DEFAULT_LOCK_TTL_MS = 360_000;
+const DEFAULT_RPC_TIMEOUT_MS = 45_000;
 const DEFAULT_MAX_SYNC_LEAVES = 20_000;
 const DEFAULT_CHAIN_FETCH_CONCURRENCY = 6;
 const TREE_UPDATE_PUBLIC_INPUT_COUNT = 5;
@@ -40,6 +41,7 @@ type MaintainerConfig = {
   lockTtlMs: number;
   maxSyncLeaves: number;
   chainFetchConcurrency: number;
+  rpcTimeoutMs: number;
   kvRestApiUrl: string;
   kvRestApiToken: string;
   allowInsecureRpc: boolean;
@@ -138,6 +140,40 @@ function readMaintainerCredential(headers: Headers): string | null {
   return parseBearerToken(headers.get("authorization"));
 }
 
+function isOriginAuthorized(
+  headers: Headers,
+  requestUrl: string,
+  allowlist: ReturnType<typeof parseOriginAllowlist>,
+): boolean {
+  if (isOriginAllowed(headers, allowlist)) {
+    return true;
+  }
+
+  try {
+    const requestOrigin = new URL(requestUrl).origin;
+
+    const originHeader = headers.get("origin");
+    if (originHeader) {
+      const callerOrigin = new URL(originHeader).origin;
+      if (callerOrigin === requestOrigin) {
+        return true;
+      }
+    }
+
+    const refererHeader = headers.get("referer");
+    if (refererHeader) {
+      const refererOrigin = new URL(refererHeader).origin;
+      if (refererOrigin === requestOrigin) {
+        return true;
+      }
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function isVercelCronInvocation(headers: Headers): boolean {
   const marker = headers.get("x-vercel-cron");
   return typeof marker === "string" && marker.trim().length > 0;
@@ -154,6 +190,23 @@ function exposeError(error: unknown, isProduction: boolean): string {
     return "Maintainer request failed.";
   }
   return error instanceof Error ? error.message : String(error);
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms.`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  }
 }
 
 function buildZeroHashes(): bigint[] {
@@ -626,6 +679,7 @@ function parseConfig(): MaintainerConfig {
     DEFAULT_CHAIN_FETCH_CONCURRENCY,
   );
   const lockTtlMs = parsePositiveIntEnv(process.env.MAINTAINER_LOCK_TTL_MS, DEFAULT_LOCK_TTL_MS);
+  const rpcTimeoutMs = parsePositiveIntEnv(process.env.MAINTAINER_RPC_TIMEOUT_MS, DEFAULT_RPC_TIMEOUT_MS);
   const kvRestApiUrl = process.env.KV_REST_API_URL || "";
   const kvRestApiToken = process.env.KV_REST_API_TOKEN || "";
   const guardStoreMode: GuardStoreMode =
@@ -649,6 +703,7 @@ function parseConfig(): MaintainerConfig {
     lockTtlMs,
     maxSyncLeaves,
     chainFetchConcurrency,
+    rpcTimeoutMs,
     kvRestApiUrl,
     kvRestApiToken,
     allowInsecureRpc,
@@ -753,7 +808,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Missing or invalid maintainer API key." }, { status: 401 });
       }
     }
-    if (config.requireOriginAllowlist && !isOriginAllowed(req.headers, config.originAllowlist)) {
+    if (config.requireOriginAllowlist && !isOriginAuthorized(req.headers, req.url, config.originAllowlist)) {
       const isTrustedCron =
         isVercelCronInvocation(req.headers) &&
         config.requireAuth &&
@@ -781,9 +836,21 @@ export async function POST(req: Request) {
     const rpcClient = new rpc.RPCClient(config.rpcUrl);
     const vaultHashPrefixed = `0x${config.vaultHash}`;
 
-    const leafCount = await callContractInteger(rpcClient, vaultHashPrefixed, "getLeafIndex");
-    const lastRootLeafCount = await callContractInteger(rpcClient, vaultHashPrefixed, "getLastRootLeafCount");
-    const currentRootHex = await callContractRootHex(rpcClient, vaultHashPrefixed);
+    const leafCount = await withTimeout(
+      callContractInteger(rpcClient, vaultHashPrefixed, "getLeafIndex"),
+      config.rpcTimeoutMs,
+      "getLeafIndex RPC call",
+    );
+    const lastRootLeafCount = await withTimeout(
+      callContractInteger(rpcClient, vaultHashPrefixed, "getLastRootLeafCount"),
+      config.rpcTimeoutMs,
+      "getLastRootLeafCount RPC call",
+    );
+    const currentRootHex = await withTimeout(
+      callContractRootHex(rpcClient, vaultHashPrefixed),
+      config.rpcTimeoutMs,
+      "getCurrentRoot RPC call",
+    );
 
     if (lastRootLeafCount > leafCount) {
       throw new Error("Invalid chain state: last rooted leaf count exceeds total leaf count.");
@@ -809,11 +876,15 @@ export async function POST(req: Request) {
     }
 
     if (missingIndices.length > 0) {
-      const fetched = await fetchLeavesForIndices(
-        rpcClient,
-        vaultHashPrefixed,
-        missingIndices,
-        config.chainFetchConcurrency,
+      const fetched = await withTimeout(
+        fetchLeavesForIndices(
+          rpcClient,
+          vaultHashPrefixed,
+          missingIndices,
+          config.chainFetchConcurrency,
+        ),
+        config.rpcTimeoutMs,
+        "Leaf backfill RPC calls",
       );
       const toPersist: Array<{ leaf_index: number; leaf_hash: string }> = [];
       for (const index of missingIndices) {
@@ -838,7 +909,11 @@ export async function POST(req: Request) {
       throw new Error(`Missing next leaf at index ${lastRootLeafCount}.`);
     }
 
-    const treeUpdateProof = await buildTreeUpdateProofPayload(config, rootedLeaves, nextLeaf);
+    const treeUpdateProof = await withTimeout(
+      buildTreeUpdateProofPayload(config, rootedLeaves, nextLeaf),
+      config.rpcTimeoutMs,
+      "Tree update proof generation",
+    );
     if (currentRootHex && currentRootHex !== treeUpdateProof.oldRootHex) {
       throw new Error(
         "Cached leaves do not match current on-chain root. Rebuild the cache before publishing a new root.",
@@ -848,8 +923,16 @@ export async function POST(req: Request) {
       throw new Error("Current root is missing while lastRootLeafCount is non-zero.");
     }
 
-    const latestLeafCount = await callContractInteger(rpcClient, vaultHashPrefixed, "getLeafIndex");
-    const latestLastRootLeafCount = await callContractInteger(rpcClient, vaultHashPrefixed, "getLastRootLeafCount");
+    const latestLeafCount = await withTimeout(
+      callContractInteger(rpcClient, vaultHashPrefixed, "getLeafIndex"),
+      config.rpcTimeoutMs,
+      "latest getLeafIndex RPC call",
+    );
+    const latestLastRootLeafCount = await withTimeout(
+      callContractInteger(rpcClient, vaultHashPrefixed, "getLastRootLeafCount"),
+      config.rpcTimeoutMs,
+      "latest getLastRootLeafCount RPC call",
+    );
     if (latestLastRootLeafCount !== lastRootLeafCount || latestLeafCount < requiredLeafCount) {
       return NextResponse.json(
         {
@@ -863,7 +946,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const versionRes = await rpcClient.getVersion();
+    const versionRes = await withTimeout(rpcClient.getVersion(), config.rpcTimeoutMs, "getVersion RPC call");
     const networkMagic = versionRes.protocol.network;
     const contract = new experimental.SmartContract(
       vaultHashPrefixed as unknown as import("@cityofzion/neon-core").u.HexString,
@@ -882,14 +965,18 @@ export async function POST(req: Request) {
     ];
 
     const newRootPayload = Buffer.from(treeUpdateProof.newRootHex, "hex").toString("base64");
-    const txid = await contract.invoke(
-      "updateMerkleRoot",
-      [
-        sc.ContractParam.byteArray(treeUpdateProof.proofPayload),
-        sc.ContractParam.byteArray(treeUpdateProof.publicInputsPayload),
-        sc.ContractParam.byteArray(newRootPayload),
-      ],
-      signers,
+    const txid = await withTimeout(
+      contract.invoke(
+        "updateMerkleRoot",
+        [
+          sc.ContractParam.byteArray(treeUpdateProof.proofPayload),
+          sc.ContractParam.byteArray(treeUpdateProof.publicInputsPayload),
+          sc.ContractParam.byteArray(newRootPayload),
+        ],
+        signers,
+      ),
+      config.rpcTimeoutMs,
+      "updateMerkleRoot invoke",
     );
 
     const metadataWarning = await appendRootMetadata(treeUpdateProof.updatedLeafCount, treeUpdateProof.newRootHex, txid);
