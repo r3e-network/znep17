@@ -16,17 +16,19 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 540;
 
 const HASH160_HEX_RE = /^(?:0x)?[0-9a-fA-F]{40}$/;
 const HEX32_RE = /^[0-9a-fA-F]{64}$/;
 const TREE_DEPTH = 20;
-const DEFAULT_LOCK_TTL_MS = 360_000;
-const DEFAULT_RPC_TIMEOUT_MS = 240_000;
+const DEFAULT_LOCK_TTL_MS = 540_000;
+const DEFAULT_RPC_TIMEOUT_MS = 420_000;
 const DEFAULT_MAX_SYNC_LEAVES = 20_000;
 const DEFAULT_CHAIN_FETCH_CONCURRENCY = 6;
 const TREE_UPDATE_PUBLIC_INPUT_COUNT = 5;
 const TREE_UPDATE_PUBLIC_INPUTS_PACKED_BYTES = 160;
+const MAINTAINER_STATUS_TTL_MS = 60 * 60_000;
+const MAINTAINER_STATUS_KEY_PREFIX = "znep17:maintainer-status:";
 const ALLOW_TEST_OVERRIDES = process.env.VITEST === "true";
 
 type GuardStoreMode = "memory" | "durable";
@@ -51,6 +53,31 @@ type MaintainerConfig = {
   kvRestApiUrl: string;
   kvRestApiToken: string;
   allowInsecureRpc: boolean;
+};
+
+type MaintainerStatusStage =
+  | "starting"
+  | "syncing_leaves"
+  | "proof_generation"
+  | "submitting_root_update"
+  | "completed";
+
+type MaintainerStatusState = "running" | "up_to_date" | "success" | "failed";
+
+type MaintainerStatusSnapshot = {
+  state: MaintainerStatusState;
+  stage: MaintainerStatusStage;
+  runId?: string;
+  startedAt?: string;
+  updatedAt: string;
+  finishedAt?: string;
+  durationMs?: number;
+  error?: string;
+  txid?: string;
+  newRoot?: string;
+  leavesProcessed?: number;
+  remainingLeaves?: number;
+  currentLeaves?: number;
 };
 
 type RpcStackItem = {
@@ -196,6 +223,31 @@ function exposeError(error: unknown, isProduction: boolean): string {
     return "Maintainer request failed.";
   }
   return error instanceof Error ? error.message : String(error);
+}
+
+function toMaintainerStatusError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const normalized = raw.trim().toLowerCase();
+
+  if (normalized.includes("tree update proof generation timed out")) {
+    return "Tree update proof generation timed out before completion.";
+  }
+  if (normalized.includes("timed out") && normalized.includes("update") && normalized.includes("rpc")) {
+    return "Maintainer timed out while waiting for RPC responses.";
+  }
+  if (normalized.includes("root state changed while computing proof")) {
+    return "Root changed while proving; maintainer will retry with fresh chain state.";
+  }
+  if (normalized.includes("cached leaves do not match current on-chain root")) {
+    return "Leaf cache and on-chain root are out of sync.";
+  }
+  if (normalized.includes("maintainer update already in progress")) {
+    return "Maintainer update is already in progress.";
+  }
+  if (normalized.includes("missing or invalid maintainer api key")) {
+    return "Maintainer authentication failed.";
+  }
+  return raw;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -621,6 +673,26 @@ function createRedisClient(config: MaintainerConfig): Redis | null {
   return new Redis({ url: config.kvRestApiUrl, token: config.kvRestApiToken });
 }
 
+function getMaintainerStatusKey(vaultHash: string): string {
+  return `${MAINTAINER_STATUS_KEY_PREFIX}${vaultHash}`;
+}
+
+async function publishMaintainerStatus(
+  config: MaintainerConfig | null,
+  redisClient: Redis | null,
+  status: MaintainerStatusSnapshot,
+): Promise<void> {
+  if (!config) return;
+  if (config.guardStoreMode !== "durable" || !redisClient) return;
+
+  const key = getMaintainerStatusKey(config.vaultHash);
+  try {
+    await redisClient.set(key, JSON.stringify(status), { px: MAINTAINER_STATUS_TTL_MS });
+  } catch (error: unknown) {
+    console.error("Failed to publish maintainer status:", error instanceof Error ? error.message : String(error));
+  }
+}
+
 async function acquireDurableLock(redisClient: Redis | null, key: string, ttlMs: number): Promise<boolean> {
   if (!redisClient) {
     throw new Error("Durable lock is not configured.");
@@ -812,6 +884,9 @@ export async function POST(req: Request) {
   let redisClient: Redis | null = null;
   let lockKey: string | null = null;
   let lockHeld = false;
+  let statusStage: MaintainerStatusStage = "starting";
+  let runId: string | null = null;
+  let runStartedAt = 0;
 
   try {
     config = parseConfig();
@@ -853,6 +928,16 @@ export async function POST(req: Request) {
       );
     }
 
+    runStartedAt = Date.now();
+    runId = `${runStartedAt.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    await publishMaintainerStatus(config, redisClient, {
+      state: "running",
+      stage: statusStage,
+      runId,
+      startedAt: new Date(runStartedAt).toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
     const account = new wallet.Account(config.maintainerWif);
     const rpcClient = new rpc.RPCClient(config.rpcUrl);
     const vaultHashPrefixed = `0x${config.vaultHash}`;
@@ -877,12 +962,34 @@ export async function POST(req: Request) {
       throw new Error("Invalid chain state: last rooted leaf count exceeds total leaf count.");
     }
     if (leafCount === lastRootLeafCount) {
+      const now = new Date().toISOString();
+      await publishMaintainerStatus(config, redisClient, {
+        state: "up_to_date",
+        stage: "completed",
+        runId: runId || undefined,
+        startedAt: runStartedAt > 0 ? new Date(runStartedAt).toISOString() : undefined,
+        updatedAt: now,
+        finishedAt: now,
+        durationMs: runStartedAt > 0 ? Date.now() - runStartedAt : undefined,
+        currentLeaves: leafCount,
+      });
       return NextResponse.json({
         success: true,
         message: "Tree is already up to date.",
         currentLeaves: leafCount,
       });
     }
+
+    statusStage = "syncing_leaves";
+    await publishMaintainerStatus(config, redisClient, {
+      state: "running",
+      stage: statusStage,
+      runId: runId || undefined,
+      startedAt: runStartedAt > 0 ? new Date(runStartedAt).toISOString() : undefined,
+      updatedAt: new Date().toISOString(),
+      currentLeaves: leafCount,
+      remainingLeaves: Math.max(0, leafCount - lastRootLeafCount),
+    });
 
     const requiredLeafCount = lastRootLeafCount + 1;
     const leafCache = await loadLeafCache(requiredLeafCount);
@@ -929,6 +1036,17 @@ export async function POST(req: Request) {
     if (typeof nextLeaf !== "bigint") {
       throw new Error(`Missing next leaf at index ${lastRootLeafCount}.`);
     }
+
+    statusStage = "proof_generation";
+    await publishMaintainerStatus(config, redisClient, {
+      state: "running",
+      stage: statusStage,
+      runId: runId || undefined,
+      startedAt: runStartedAt > 0 ? new Date(runStartedAt).toISOString() : undefined,
+      updatedAt: new Date().toISOString(),
+      currentLeaves: leafCount,
+      remainingLeaves: Math.max(0, leafCount - lastRootLeafCount),
+    });
 
     const treeUpdateProof = await withTimeout(
       buildTreeUpdateProofPayload(config, rootedLeaves, nextLeaf),
@@ -985,6 +1103,17 @@ export async function POST(req: Request) {
       }),
     ];
 
+    statusStage = "submitting_root_update";
+    await publishMaintainerStatus(config, redisClient, {
+      state: "running",
+      stage: statusStage,
+      runId: runId || undefined,
+      startedAt: runStartedAt > 0 ? new Date(runStartedAt).toISOString() : undefined,
+      updatedAt: new Date().toISOString(),
+      currentLeaves: latestLeafCount,
+      remainingLeaves: Math.max(0, latestLeafCount - treeUpdateProof.updatedLeafCount),
+    });
+
     const newRootPayload = Buffer.from(treeUpdateProof.newRootHex, "hex").toString("base64");
     const txid = await withTimeout(
       contract.invoke(
@@ -1002,6 +1131,21 @@ export async function POST(req: Request) {
 
     const metadataWarning = await appendRootMetadata(treeUpdateProof.updatedLeafCount, treeUpdateProof.newRootHex, txid);
     const remainingLeaves = Math.max(0, latestLeafCount - treeUpdateProof.updatedLeafCount);
+    const finishedAt = new Date().toISOString();
+    await publishMaintainerStatus(config, redisClient, {
+      state: "success",
+      stage: "completed",
+      runId: runId || undefined,
+      startedAt: runStartedAt > 0 ? new Date(runStartedAt).toISOString() : undefined,
+      updatedAt: finishedAt,
+      finishedAt,
+      durationMs: runStartedAt > 0 ? Date.now() - runStartedAt : undefined,
+      txid,
+      newRoot: treeUpdateProof.newRootHex,
+      leavesProcessed: treeUpdateProof.updatedLeafCount,
+      remainingLeaves,
+      currentLeaves: latestLeafCount,
+    });
 
     return NextResponse.json({
       success: true,
@@ -1015,6 +1159,17 @@ export async function POST(req: Request) {
   } catch (error: unknown) {
     const isProduction = config?.isProduction ?? false;
     console.error("Maintainer Error:", error instanceof Error ? error.message : String(error));
+    const finishedAt = new Date().toISOString();
+    await publishMaintainerStatus(config, redisClient, {
+      state: "failed",
+      stage: statusStage,
+      runId: runId || undefined,
+      startedAt: runStartedAt > 0 ? new Date(runStartedAt).toISOString() : undefined,
+      updatedAt: finishedAt,
+      finishedAt,
+      durationMs: runStartedAt > 0 ? Date.now() - runStartedAt : undefined,
+      error: toMaintainerStatusError(error),
+    });
     return NextResponse.json(
       {
         success: false,

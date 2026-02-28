@@ -11,6 +11,7 @@ import {
   getMerkleProofRetryDecision,
   getMerkleProofRetryStatus,
   MERKLE_FINALIZATION_MAX_WAIT_MS,
+  type MaintainerStatusSnapshot,
 } from "./lib/withdraw-retry";
 import {
   WITHDRAW_STEP_SEQUENCE,
@@ -233,6 +234,25 @@ type MerkleProofResponse = {
   leafCount: number;
 };
 
+type RelayProofLookupResponse = MerkleProofResponse & {
+  error?: string;
+  pendingFinalization?: boolean;
+  maintainerStatus?: MaintainerStatusSnapshot;
+  maintainerHint?: string;
+};
+
+class MerkleProofLookupError extends Error {
+  maintainerStatus?: MaintainerStatusSnapshot;
+  maintainerHint?: string;
+
+  constructor(message: string, options?: { maintainerStatus?: MaintainerStatusSnapshot; maintainerHint?: string }) {
+    super(message);
+    this.name = "MerkleProofLookupError";
+    this.maintainerStatus = options?.maintainerStatus;
+    this.maintainerHint = options?.maintainerHint;
+  }
+}
+
 type NoteArtifacts = {
   nullifierHashDecimal: string;
   nullifierHashHex: string;
@@ -281,9 +301,12 @@ async function fetchMerkleProofFromRelay(commitmentHex: string): Promise<MerkleP
     cache: "no-store",
     headers: buildRelayHeaders(),
   });
-  const data = (await res.json()) as MerkleProofResponse & { error?: string; pendingFinalization?: boolean };
+  const data = (await res.json()) as RelayProofLookupResponse;
   if (!res.ok || !Array.isArray(data.pathElements)) {
-    throw new Error((data as { error?: string }).error || "Failed to fetch Merkle proof from relay");
+    throw new MerkleProofLookupError(data.error || "Failed to fetch Merkle proof from relay", {
+      maintainerStatus: data.maintainerStatus,
+      maintainerHint: data.maintainerHint,
+    });
   }
   return data;
 }
@@ -674,7 +697,12 @@ export default function Home() {
           setWithdrawStatusHint("");
         } catch (error: unknown) {
           const message = getErrorMessage(error, "Failed to fetch Merkle proof from relay");
-          const retryDecision = getMerkleProofRetryDecision(message, Date.now() - merkleFetchStartedAt);
+          const proofLookupError = error instanceof MerkleProofLookupError ? error : null;
+          const retryDecision = getMerkleProofRetryDecision(
+            message,
+            Date.now() - merkleFetchStartedAt,
+            proofLookupError?.maintainerStatus,
+          );
           if (!retryDecision.retry || typeof retryDecision.delayMs !== "number") {
             if (retryDecision.errorMessage) {
               throw new Error(retryDecision.errorMessage);
@@ -682,7 +710,13 @@ export default function Home() {
             throw error;
           }
           setWithdrawStatusHint(
-            getMerkleProofRetryStatus(message, retryDecision.delayMs, Date.now() - merkleFetchStartedAt),
+            proofLookupError?.maintainerHint ||
+              getMerkleProofRetryStatus(
+                message,
+                retryDecision.delayMs,
+                Date.now() - merkleFetchStartedAt,
+                proofLookupError?.maintainerStatus,
+              ),
           );
           await sleep(retryDecision.delayMs);
         }
@@ -1131,8 +1165,8 @@ export default function Home() {
               {(withdrawActiveStep || withdrawFailedStep || withdrawCompleted) && (
                 <div className="mt-3 rounded-lg border border-blue-900/50 bg-blue-950/20 p-3">
                   <p className="mb-2 text-xs text-blue-200/80">
-                    Expected normal withdrawal time: <strong>~15-30 seconds</strong> once your deposit is finalized in a Merkle root.
-                    {" "}If finalization is delayed, zNEP-17 retries automatically for up to{" "}
+                    Expected normal withdrawal time: <strong>~15-30 seconds</strong> after your deposit is finalized in a Merkle root.
+                    {" "}Merkle finalization may take a few minutes while maintainer proof generation runs; zNEP-17 retries automatically for up to{" "}
                     <strong>{MERKLE_FINALIZATION_MAX_WAIT_MINUTES} minutes</strong>.
                   </p>
                   <p

@@ -172,7 +172,7 @@ function run() {
   const maintainerRequireOriginAllowlist = parseBoolean(read(env, "MAINTAINER_REQUIRE_ORIGIN_ALLOWLIST"), true);
   const maintainerOrigins = csv(env, "MAINTAINER_ALLOWED_ORIGINS");
   const mergedMaintainerOrigins = maintainerOrigins.length > 0 ? maintainerOrigins : mergedRelayerOrigins;
-  const maintainerRpcTimeoutMs = parsePositiveInt(read(env, "MAINTAINER_RPC_TIMEOUT_MS"), 240000);
+  const maintainerRpcTimeoutMs = parsePositiveInt(read(env, "MAINTAINER_RPC_TIMEOUT_MS"), 420000);
 
   const supabaseUrl = read(env, "SUPABASE_URL") || read(env, "NEXT_PUBLIC_SUPABASE_URL") || DEFAULT_SUPABASE_URL;
   const supabaseServiceRoleKey = read(env, "SUPABASE_SERVICE_ROLE_KEY");
@@ -307,8 +307,8 @@ function run() {
   );
 
   addAdvisory(
-    "MAINTAINER_RPC_TIMEOUT_MS is high enough for proving load (recommended >= 120000)",
-    maintainerRpcTimeoutMs >= 120000,
+    "MAINTAINER_RPC_TIMEOUT_MS is high enough for proving load (recommended >= 240000)",
+    maintainerRpcTimeoutMs >= 240000,
     `current=${maintainerRpcTimeoutMs}`,
   );
 

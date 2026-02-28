@@ -55,6 +55,8 @@ const MERKLE_MAX_LEAVES_HARD_LIMIT = 200_000;
 const VERIFIER_PROBE_CACHE_MS = 300_000;
 const DEFAULT_MAINTAINER_AUTOKICK_INTERVAL_MS = 20_000;
 const DEFAULT_MAINTAINER_AUTOKICK_TIMEOUT_MS = 3_000;
+const MAINTAINER_STATUS_KEY_PREFIX = "znep17:maintainer-status:";
+const MAINTAINER_STATUS_MAX_AGE_MS = 60 * 60_000;
 
 type ProofMode = "snark";
 type GuardStoreMode = "memory" | "durable";
@@ -82,6 +84,22 @@ type SnarkjsLike = {
 type RpcStackItem = {
   type?: string;
   value?: unknown;
+};
+
+type MaintainerStatusSnapshot = {
+  state?: string;
+  stage?: string;
+  runId?: string;
+  startedAt?: string;
+  updatedAt?: string;
+  finishedAt?: string;
+  durationMs?: number;
+  error?: string;
+  txid?: string;
+  newRoot?: string;
+  leavesProcessed?: number;
+  remainingLeaves?: number;
+  currentLeaves?: number;
 };
 
 const RELAYER_PROOF_MODE: ProofMode = "snark";
@@ -353,6 +371,100 @@ function configIssueResponse(statusCode = 503): NextResponse | null {
     { error: "Relayer is not fully configured.", issues: relayConfigIssues },
     { status: statusCode },
   );
+}
+
+function parseMaintainerStatus(raw: unknown): MaintainerStatusSnapshot | null {
+  const source =
+    typeof raw === "string"
+      ? (() => {
+          try {
+            return JSON.parse(raw) as unknown;
+          } catch {
+            return null;
+          }
+        })()
+      : raw;
+  if (!source || typeof source !== "object") return null;
+
+  const candidate = source as Record<string, unknown>;
+  const state = typeof candidate.state === "string" ? candidate.state.trim().toLowerCase() : "";
+  if (!state) return null;
+
+  const updatedAt = typeof candidate.updatedAt === "string" ? candidate.updatedAt : undefined;
+  if (updatedAt) {
+    const updatedAtMs = Date.parse(updatedAt);
+    if (Number.isFinite(updatedAtMs) && Date.now() - updatedAtMs > MAINTAINER_STATUS_MAX_AGE_MS) {
+      return null;
+    }
+  }
+
+  const stage = typeof candidate.stage === "string" ? candidate.stage.trim().toLowerCase() : undefined;
+  const durationMs =
+    typeof candidate.durationMs === "number" && Number.isFinite(candidate.durationMs) && candidate.durationMs >= 0
+      ? candidate.durationMs
+      : undefined;
+  const remainingLeaves =
+    typeof candidate.remainingLeaves === "number" && Number.isFinite(candidate.remainingLeaves)
+      ? Math.max(0, Math.floor(candidate.remainingLeaves))
+      : undefined;
+  const leavesProcessed =
+    typeof candidate.leavesProcessed === "number" && Number.isFinite(candidate.leavesProcessed)
+      ? Math.max(0, Math.floor(candidate.leavesProcessed))
+      : undefined;
+  const currentLeaves =
+    typeof candidate.currentLeaves === "number" && Number.isFinite(candidate.currentLeaves)
+      ? Math.max(0, Math.floor(candidate.currentLeaves))
+      : undefined;
+
+  return {
+    state,
+    stage,
+    runId: typeof candidate.runId === "string" ? candidate.runId : undefined,
+    startedAt: typeof candidate.startedAt === "string" ? candidate.startedAt : undefined,
+    updatedAt,
+    finishedAt: typeof candidate.finishedAt === "string" ? candidate.finishedAt : undefined,
+    durationMs,
+    error: typeof candidate.error === "string" ? candidate.error : undefined,
+    txid: typeof candidate.txid === "string" ? candidate.txid : undefined,
+    newRoot: typeof candidate.newRoot === "string" ? candidate.newRoot : undefined,
+    leavesProcessed,
+    remainingLeaves,
+    currentLeaves,
+  };
+}
+
+async function readMaintainerStatus(vaultScriptHash: string): Promise<MaintainerStatusSnapshot | null> {
+  if (!redisClient) return null;
+  const key = `${MAINTAINER_STATUS_KEY_PREFIX}${vaultScriptHash}`;
+  try {
+    const raw = await redisClient.get<unknown>(key);
+    return parseMaintainerStatus(raw);
+  } catch {
+    return null;
+  }
+}
+
+function getMaintainerHint(status: MaintainerStatusSnapshot | null): string | null {
+  if (!status || !status.state) return null;
+  const state = status.state.toLowerCase();
+  const stage = (status.stage || "").toLowerCase();
+
+  if (state === "running" && stage === "proof_generation") {
+    return "Maintainer is generating the tree-update proof. This can take a few minutes on testnet.";
+  }
+  if (state === "running" && stage === "submitting_root_update") {
+    return "Maintainer generated the proof and is submitting the root update transaction.";
+  }
+  if (state === "failed" && status.error) {
+    return `Maintainer last failed attempt: ${status.error}`;
+  }
+  if (state === "success") {
+    return "Maintainer recently finalized a root. Proof lookup should succeed after chain/index refresh.";
+  }
+  if (state === "up_to_date") {
+    return "Maintainer reports tree is up to date. If this persists, verify your commitment index and root state.";
+  }
+  return null;
 }
 
 function isOriginAuthorized(headers: Headers, requestUrl: string): boolean {
@@ -1103,6 +1215,8 @@ export async function GET(req: Request) {
       if (commitmentIndex >= lastRootLeafCount) {
         void kickMaintainerAsync(req, vaultScriptHash);
         const message = "Commitment is not yet included in a finalized Merkle root. Retry shortly.";
+        const maintainerStatus = await readMaintainerStatus(vaultScriptHash);
+        const maintainerHint = getMaintainerHint(maintainerStatus);
         if (softProofMode) {
           return NextResponse.json(
             {
@@ -1111,12 +1225,14 @@ export async function GET(req: Request) {
               commitmentIndex,
               lastRootLeafCount,
               leafCount,
+              maintainerStatus,
+              ...(maintainerHint ? { maintainerHint } : {}),
             },
             { headers: { "Cache-Control": "no-store" } },
           );
         }
         return NextResponse.json(
-          { error: message },
+          { error: message, ...(maintainerHint ? { maintainerHint } : {}) },
           { status: 409, headers: { "Cache-Control": "no-store" } },
         );
       }
