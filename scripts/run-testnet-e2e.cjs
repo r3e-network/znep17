@@ -160,6 +160,13 @@ async function getBlsCurve() {
   return cachedBlsCurve;
 }
 
+async function cleanupResources() {
+  if (cachedBlsCurve && typeof cachedBlsCurve.terminate === "function") {
+    await cachedBlsCurve.terminate();
+  }
+  cachedBlsCurve = null;
+}
+
 function convertFfCompressedToNeo(bytes) {
   const out = Uint8Array.from(bytes);
   const ffSign = (out[0] & COMPRESSED_FLAG) !== 0;
@@ -1635,7 +1642,19 @@ async function main() {
   console.log(`Verifier: ${verifierHash}`);
 }
 
-main().catch((error) => {
-  console.error(`zNEP17 testnet e2e failed: ${error && error.message ? error.message : error}`);
-  process.exit(1);
-});
+main()
+  .then(async () => {
+    await cleanupResources();
+    process.exit(0);
+  })
+  .catch(async (error) => {
+    try {
+      await cleanupResources();
+    } catch (cleanupError) {
+      console.error(
+        `zNEP17 testnet e2e cleanup failed: ${cleanupError && cleanupError.message ? cleanupError.message : cleanupError}`
+      );
+    }
+    console.error(`zNEP17 testnet e2e failed: ${error && error.message ? error.message : error}`);
+    process.exit(1);
+  });
