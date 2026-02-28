@@ -20,45 +20,13 @@ npm install
 cat > .env.local <<'ENV'
 RELAYER_WIF=YourFundedRelayerWIF
 RELAYER_API_KEY=strong-random-secret
-# Non-secret defaults (RPC, vault hash, token allowlist, origin allowlist, verifier hash)
-# are hardcoded for znep17.app testnet and can be overridden only if needed:
-# RPC_URL=https://testnet1.neo.coz.io:443
-# VAULT_HASH=0xa33b0788ad0324c5eb40ea803be8ed96f24d7fa6
-# ALLOWED_TOKEN_HASHES=0x2a0010799d828155cf522f47c38e4e9d797a9697,0xd2a4cff31913016155e38e474a2c06d08be276cf
-# RELAYER_ALLOWED_ORIGINS=http://localhost:3000
-# Optional legacy HTTP testnet seeds (not recommended):
-# RPC_URL=http://seed2t5.neo.org:20332
-# RELAYER_ALLOW_INSECURE_RPC=true
-# Tree updater (recommended: cron/server-to-server only)
-MAINTAINER_VAULT_HASH=0xYourVaultContractHash
-MAINTAINER_REQUIRE_AUTH=true
-# By default maintainer uses existing relayer secrets:
-# - signer: RELAYER_WIF
-# - auth secret: RELAYER_API_KEY
-# Optional overrides (only if you want dedicated maintainer credentials):
+CRON_SECRET=strong-random-secret
+KV_REST_API_URL=https://example.upstash.io
+KV_REST_API_TOKEN=replace-with-upstash-rest-token
+SUPABASE_SERVICE_ROLE_KEY=replace-with-supabase-service-role-key
+# Optional secret overrides (not required):
 # MAINTAINER_WIF=MaintainerWifWithGas
 # MAINTAINER_API_KEY=another-strong-random-secret
-MAINTAINER_REQUIRE_DURABLE_LOCK=false
-# Optional maintainer RPC override + legacy HTTP allowance:
-# MAINTAINER_RPC_URL=http://seed5t5.neo.org:20332
-# MAINTAINER_ALLOW_INSECURE_RPC=true
-# Optional: override tree-update proving artifact locations
-# MAINTAINER_TREE_UPDATE_WASM_PATH=/absolute/path/to/tree_update.wasm
-# MAINTAINER_TREE_UPDATE_ZKEY_PATH=/absolute/path/to/tree_update_final.zkey
-# Optional: pin expected on-chain verifier hash (recommended, required in production strong mode)
-# RELAYER_EXPECTED_VERIFIER_HASH=0xYourVerifierContractHash
-# Optional frontend deployment tuning:
-# NEXT_PUBLIC_BASE_PATH=/app
-# NEXT_PUBLIC_EXPLORER_TX_BASE_URL=https://testnet.neotube.io/transaction/
-# Optional (defaults to false for safety):
-# NEXT_PUBLIC_ALLOW_CUSTOM_VAULT_HASH=false
-# Optional proof endpoint bootstrap cap (protects server from oversized cold rebuilds):
-# RELAYER_MERKLE_MAX_BOOTSTRAP_LEAVES=50000
-# Optional: keep maintainer controls hidden in public UI (default false):
-# NEXT_PUBLIC_ENABLE_MAINTAINER_TOOLS=false
-# Optional: bound per-run cache catch-up for maintainer endpoint:
-# MAINTAINER_MAX_SYNC_LEAVES=20000
-# MAINTAINER_RPC_TIMEOUT_MS=240000
 ENV
 
 npm run dev
@@ -79,23 +47,14 @@ npm run dev
 1. Configure secrets:
    - `RELAYER_WIF`
    - `RELAYER_API_KEY`
+   - `CRON_SECRET` (same value as `RELAYER_API_KEY`)
    - `SUPABASE_SERVICE_ROLE_KEY`
 2. Configure durable Redis:
    - `KV_REST_API_URL`
    - `KV_REST_API_TOKEN`
-3. Browser UI does not embed relayer API keys; keep `RELAYER_REQUIRE_AUTH=false` for public web usage unless you add a trusted backend.
+3. Non-secret chain/policy values are hardcoded in source for the znep17.app testnet deployment.
 4. Configure the vault contract with the relayer address via `setRelayer`.
-5. Keep `NEXT_PUBLIC_ALLOW_CUSTOM_VAULT_HASH=false` (default) so the UI cannot send deposits to arbitrary vault hashes.
-6. Keep `NEXT_PUBLIC_ENABLE_MAINTAINER_TOOLS=false` in public deployments.
-7. Configure maintainer endpoint hardening:
-   - `MAINTAINER_REQUIRE_AUTH=true`
-   - `RELAYER_API_KEY=<strong secret>` (or optional `MAINTAINER_API_KEY` override)
-   - `MAINTAINER_REQUIRE_DURABLE_LOCK=true` with `KV_REST_API_URL` + `KV_REST_API_TOKEN`
-8. Do not expose maintainer/relayer API keys to browser clients; invoke `/api/maintainer` from cron/server jobs.
-9. For Vercel Cron, set `CRON_SECRET` to the same value as the maintainer auth secret (`MAINTAINER_API_KEY` or `RELAYER_API_KEY`).
-10. Configure maintainer state backend:
-   - `SUPABASE_URL` (or `NEXT_PUBLIC_SUPABASE_URL`)
-   - `SUPABASE_SERVICE_ROLE_KEY`
+5. Do not expose maintainer/relayer API keys to browser clients; invoke `/api/maintainer` from cron/server jobs.
 
 ## Vercel
 
@@ -115,9 +74,7 @@ The relayer and maintainer routes run in `runtime=nodejs` as dynamic API routes 
 ### Production Env Checklist (Vercel)
 
 1. Use [`web/env.vercel.production.example`](./env.vercel.production.example) as the source template for all Production env vars in Vercel.
-2. Populate secrets and addresses in Vercel Project Settings -> Environment Variables (Production).
-   - For this deployment, keep `RELAYER_ALLOWED_ORIGINS=https://znep17.app,https://www.znep17.app`.
-   - Keep `MAINTAINER_ALLOWED_ORIGINS=https://znep17.app,https://www.znep17.app` unless maintainer is called only from a separate backend/cron origin.
+2. Populate secrets in Vercel Project Settings -> Environment Variables (Production).
 3. Pull the configured Production env set locally:
    - `vercel env pull .env.vercel.production`
 4. Run the production validator:

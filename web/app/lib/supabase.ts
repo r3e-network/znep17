@@ -12,12 +12,7 @@ function readRequiredEnv(name: string): string {
 }
 
 function readSupabaseUrl(): string {
-  const directUrl = process.env.SUPABASE_URL?.trim();
-  const publicUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const url = directUrl || publicUrl || DEFAULT_SUPABASE_URL;
-  if (!url) {
-    throw new Error("SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) is required.");
-  }
+  const url = DEFAULT_SUPABASE_URL;
 
   let parsed: URL;
   try {

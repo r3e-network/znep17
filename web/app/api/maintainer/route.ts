@@ -27,6 +27,7 @@ const DEFAULT_MAX_SYNC_LEAVES = 20_000;
 const DEFAULT_CHAIN_FETCH_CONCURRENCY = 6;
 const TREE_UPDATE_PUBLIC_INPUT_COUNT = 5;
 const TREE_UPDATE_PUBLIC_INPUTS_PACKED_BYTES = 160;
+const ALLOW_TEST_OVERRIDES = process.env.VITEST === "true";
 
 type GuardStoreMode = "memory" | "durable";
 
@@ -654,34 +655,44 @@ function parseConfig(): MaintainerConfig {
   const isProduction = vercelEnv === "production" || (nodeEnv === "production" && vercelEnv.length === 0);
 
   const rpcUrl =
-    process.env.MAINTAINER_RPC_URL ||
-    process.env.RPC_URL ||
-    process.env.NEXT_PUBLIC_RPC_URL ||
-    DEFAULT_RPC_URL;
+    (ALLOW_TEST_OVERRIDES
+      ? process.env.MAINTAINER_RPC_URL || process.env.RPC_URL || process.env.NEXT_PUBLIC_RPC_URL
+      : undefined) || DEFAULT_RPC_URL;
   const rawVaultHash =
-    process.env.MAINTAINER_VAULT_HASH ||
-    process.env.VAULT_HASH ||
-    process.env.NEXT_PUBLIC_VAULT_HASH ||
-    DEFAULT_VAULT_HASH;
+    (ALLOW_TEST_OVERRIDES
+      ? process.env.MAINTAINER_VAULT_HASH || process.env.VAULT_HASH || process.env.NEXT_PUBLIC_VAULT_HASH
+      : undefined) || DEFAULT_VAULT_HASH;
   const maintainerWif = process.env.MAINTAINER_WIF || process.env.RELAYER_WIF || "";
   const maintainerApiKey = process.env.MAINTAINER_API_KEY || process.env.RELAYER_API_KEY || "";
   const treeUpdateWasmPath =
-    process.env.MAINTAINER_TREE_UPDATE_WASM_PATH || path.join(process.cwd(), "public", "zk", "tree_update.wasm");
+    (ALLOW_TEST_OVERRIDES ? process.env.MAINTAINER_TREE_UPDATE_WASM_PATH : undefined) ||
+    path.join(process.cwd(), "public", "zk", "tree_update.wasm");
   const treeUpdateZkeyPath =
-    process.env.MAINTAINER_TREE_UPDATE_ZKEY_PATH || path.join(process.cwd(), "public", "zk", "tree_update_final.zkey");
-  const requireAuth = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_AUTH, true);
-  const requireOriginAllowlist = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_ORIGIN_ALLOWLIST, true);
-  const requireDurableLock = parseBooleanEnv(process.env.MAINTAINER_REQUIRE_DURABLE_LOCK, true);
+    (ALLOW_TEST_OVERRIDES ? process.env.MAINTAINER_TREE_UPDATE_ZKEY_PATH : undefined) ||
+    path.join(process.cwd(), "public", "zk", "tree_update_final.zkey");
+  const requireAuth = parseBooleanEnv(ALLOW_TEST_OVERRIDES ? process.env.MAINTAINER_REQUIRE_AUTH : undefined, true);
+  const requireOriginAllowlist = parseBooleanEnv(
+    ALLOW_TEST_OVERRIDES ? process.env.MAINTAINER_REQUIRE_ORIGIN_ALLOWLIST : undefined,
+    true,
+  );
+  const requireDurableLock = parseBooleanEnv(
+    ALLOW_TEST_OVERRIDES ? process.env.MAINTAINER_REQUIRE_DURABLE_LOCK : undefined,
+    true,
+  );
   const allowInsecureRpc = parseBooleanEnv(
-    process.env.MAINTAINER_ALLOW_INSECURE_RPC,
-    parseBooleanEnv(process.env.RELAYER_ALLOW_INSECURE_RPC, false),
+    ALLOW_TEST_OVERRIDES ? process.env.MAINTAINER_ALLOW_INSECURE_RPC : undefined,
+    parseBooleanEnv(ALLOW_TEST_OVERRIDES ? process.env.RELAYER_ALLOW_INSECURE_RPC : undefined, false),
   );
   const allowedOriginsRaw =
-    process.env.MAINTAINER_ALLOWED_ORIGINS || process.env.RELAYER_ALLOWED_ORIGINS || DEFAULT_RELAYER_ALLOWED_ORIGINS;
+    (ALLOW_TEST_OVERRIDES ? process.env.MAINTAINER_ALLOWED_ORIGINS || process.env.RELAYER_ALLOWED_ORIGINS : undefined) ||
+    DEFAULT_RELAYER_ALLOWED_ORIGINS;
   const originAllowlist = parseOriginAllowlist(allowedOriginsRaw);
-  const maxSyncLeaves = parsePositiveIntEnv(process.env.MAINTAINER_MAX_SYNC_LEAVES, DEFAULT_MAX_SYNC_LEAVES);
+  const maxSyncLeaves = parsePositiveIntEnv(
+    ALLOW_TEST_OVERRIDES ? process.env.MAINTAINER_MAX_SYNC_LEAVES : undefined,
+    DEFAULT_MAX_SYNC_LEAVES,
+  );
   const chainFetchConcurrency = parsePositiveIntEnv(
-    process.env.MAINTAINER_CHAIN_FETCH_CONCURRENCY,
+    ALLOW_TEST_OVERRIDES ? process.env.MAINTAINER_CHAIN_FETCH_CONCURRENCY : undefined,
     DEFAULT_CHAIN_FETCH_CONCURRENCY,
   );
   const lockTtlMs = DEFAULT_LOCK_TTL_MS;

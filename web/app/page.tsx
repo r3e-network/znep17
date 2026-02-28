@@ -19,6 +19,7 @@ import {
   getWithdrawStepVisualState,
   type WithdrawStep,
 } from "./lib/withdraw-progress";
+import { DEFAULT_VAULT_HASH } from "./lib/deployment-defaults";
 
 type NeoLineAccount = { address: string; label: string };
 
@@ -81,13 +82,13 @@ const HASH160_HEX_RE = /^(?:0x)?[0-9a-fA-F]{40}$/;
 const HEX_32_RE = /^[0-9a-fA-F]{64}$/;
 const SECRET_RE = /^[0-9a-fA-F]{1,64}$/;
 const DECIMAL_RE = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
-const EXPLORER_TX_BASE_OVERRIDE = sanitizeExplorerTxBaseUrl(process.env.NEXT_PUBLIC_EXPLORER_TX_BASE_URL || "");
+const EXPLORER_TX_BASE_OVERRIDE = "";
 const EXPLORER_TX_BASE_BY_NETWORK_MAGIC: Record<number, string> = {
   894710606: "https://testnet.neotube.io/transaction/",
   860833102: "https://ndora.org/transaction/",
 };
-const PUBLIC_BASE_PATH = normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH || "");
-const ALLOW_CUSTOM_VAULT_HASH = (process.env.NEXT_PUBLIC_ALLOW_CUSTOM_VAULT_HASH || "").trim().toLowerCase() === "true";
+const PUBLIC_BASE_PATH = "";
+const ALLOW_CUSTOM_VAULT_HASH = false;
 
 function normalizeHash160(input: string, fieldName: string): string {
   const trimmed = input.trim();
@@ -1237,7 +1238,7 @@ export default function Home() {
 
                 <div className="mt-4 flex flex-col items-start justify-between gap-3 border-t border-blue-900/30 pt-3 sm:flex-row sm:items-center">
                   <div className="text-[11px] text-gray-400">
-                    <span className="mb-1 block"><strong className="text-gray-300">Vault Contract:</strong> <code className="ml-1 break-all select-all rounded bg-gray-900 px-1 py-0.5">{vaultHash || process.env.NEXT_PUBLIC_VAULT_HASH || "Loading..."}</code></span>
+                    <span className="mb-1 block"><strong className="text-gray-300">Vault Contract:</strong> <code className="ml-1 break-all select-all rounded bg-gray-900 px-1 py-0.5">{vaultHash || DEFAULT_VAULT_HASH}</code></span>
                     <span className="block"><strong className="text-gray-300">Network:</strong> {networkMagic === 860833102 ? "Mainnet" : "Testnet"} ({networkMagic})</span>
                   </div>
                   <a
